@@ -159,7 +159,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 
 ### 路线图
 
-当前版本 **v0.5.0**。路线图按版本推进,**先把「模块化」做扎实(它现在就成立),再攻「自演化」(开放难题,压轴推进)**。
+当前版本 **v0.5.0**。路线图按版本推进,**先把「模块化」和「受治理能力面」做扎实,再补齐远程连续性与多 Agent 协作,最后攻「自演化」(开放难题,压轴推进)**。
 
 #### ✅ v0.5.0 · 可控内核可用(当前)
 
@@ -188,14 +188,23 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 - [ ] 结构化上下文管理(token 作压缩触发器 + 分层降级 + supersede 取舍,压缩可逆可审计)
 - [ ] Memory 模块能力开放(检索 / 形成 / 取代)
 
-#### 🤝 v0.8.0 · 多 Agent 成熟
+#### 📡 v0.8.0 · 远程连续性接口与 Remote Module
+
+- [ ] 线程状态投影接口:thread snapshot、run state、stage/tool/sub-agent 状态、pending approval、artifact、diagnostics
+- [ ] 事件流订阅接口:SSE/WebSocket/event cursor/reconnect,远端设备可只读跟随当前工作线程
+- [ ] 远程控制命令:submit message、steer、interrupt、resume、approval decision,全部回到 Host Gateway / Control Plane
+- [ ] Remote Module 示例实现:可替换的远端收发模块,承载 HTTP/SSE/WebSocket、device pairing、短期 token、会话撤销
+- [ ] 远端安全边界:远端不直接访问本地 workspace/runtime state,不绕过 Kernel/Runtime,高风险动作继续走 human gate
+- [ ] 移动端/Web/云中继作为消费形态,不要求移动设备本地执行工作负载
+
+#### 🤝 v0.9.0 · 多 Agent 成熟
 
 - [ ] 并行 fanout(激活 `maxConcurrentAgents` 并发闸门 + 结果 fan-in)
 - [ ] sub-agent 自主触发观测矩阵(多协议 × 多任务 × 多轮,诚实记录触发率)
 - [ ] 子树治理 / 预算切分 / 整树复盘完善
 - [ ] 多宿主体验:VS 扩展(VSSDK Sidecar + VSExtension)、Config GUI
 
-#### 🧬 v0.9.0 · 自演化基础设施(探索中)
+#### 🧬 v0.10.0 · 自演化基础设施(探索中)
 
 - [ ] Adaptive orchestrator 候选生成(propose 多个 StageGraph 变体)
 - [ ] 候选闭环:validate(确定性内核校验)→ trial(影子/试运行)
@@ -368,7 +377,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 
 ### Roadmap
 
-Current version **v0.5.0**. The roadmap advances by version, **solidifying "modularity" first (it works today), then tackling "self-evolution" (an open problem, saved for last)**.
+Current version **v0.5.0**. The roadmap advances by version, **solidifying modularity and governed capability surfaces first, then adding remote continuity and multi-agent collaboration, and only then tackling self-evolution (an open problem, saved for last)**.
 
 #### ✅ v0.5.0 · Controlled kernel usable (current)
 
@@ -397,14 +406,23 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying "modu
 - [ ] Structured context management (token as compaction trigger + tiered demotion + supersede-based pruning, reversible & auditable)
 - [ ] Memory module capabilities opened (retrieve / form / supersede)
 
-#### 🤝 v0.8.0 · Multi-agent maturation
+#### 📡 v0.8.0 · Remote continuity interfaces and Remote Module
+
+- [ ] Thread state projection interfaces: thread snapshot, run state, stage/tool/sub-agent state, pending approvals, artifacts, diagnostics
+- [ ] Event stream subscriptions: SSE/WebSocket/event cursor/reconnect so remote devices can follow the active work thread read-only
+- [ ] Remote control commands: submit message, steer, interrupt, resume, approval decision, all routed back through Host Gateway / Control Plane
+- [ ] Reference Remote Module implementation: replaceable remote send/receive module for HTTP/SSE/WebSocket, device pairing, short-lived tokens, session revocation
+- [ ] Remote safety boundary: remote clients do not directly access local workspace/runtime state, cannot bypass Kernel/Runtime, and high-risk actions still go through human gate
+- [ ] Mobile, Web, and cloud relay are consumption forms; mobile devices are not required to execute local workloads
+
+#### 🤝 v0.9.0 · Multi-agent maturation
 
 - [ ] Parallel fanout (activate `maxConcurrentAgents` gate + result fan-in)
 - [ ] Sub-agent autonomous-trigger observation matrix (multi-protocol × multi-task × multi-round, honestly record trigger rate)
 - [ ] Sub-tree governance / budget split / whole-tree replay refinement
 - [ ] Multi-host experience: VS extension (VSSDK Sidecar + VSExtension), Config GUI
 
-#### 🧬 v0.9.0 · Self-evolution infrastructure (exploratory)
+#### 🧬 v0.10.0 · Self-evolution infrastructure (exploratory)
 
 - [ ] Adaptive orchestrator candidate generation (propose multiple StageGraph variants)
 - [ ] Candidate loop: validate (deterministic kernel check) → trial (shadow/trial run)
