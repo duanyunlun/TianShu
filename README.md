@@ -169,7 +169,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 - [x] 多 provider live:OpenAI Responses / Anthropic Messages / OpenAI-compatible Chat Completions
 - [x] 只读工具默认开放,写工具 human gate + 审批 + 路径沙箱
 - [x] 串行 sub-agent 机制(嵌套受治理 turn + 结构闸门防 fork 炸弹)
-- [x] 跨平台 Release 包 + 首次自举(`init`)+ 离线自检(`doctor`)+ 联网探测(`doctor --probe`)
+- [x] 目录式 Release 包 + 首次自举(`init`)+ 离线自检(`doctor`)+ 联网探测(`doctor --probe`);Windows 已 smoke, Linux/macOS 包形态已生成,跨平台 smoke 进入后续补验
 
 #### 🧩 v0.6.0 · 模块化开放
 
@@ -195,6 +195,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 - [ ] 远程控制命令:submit message、steer、interrupt、resume、approval decision,全部回到 Host Gateway / Control Plane
 - [ ] Remote Module 示例实现:可替换的远端收发模块,承载 HTTP/SSE/WebSocket、device pairing、短期 token、会话撤销
 - [ ] 远端安全边界:远端不直接访问本地 workspace/runtime state,不绕过 Kernel/Runtime,高风险动作继续走 human gate
+- [ ] 多宿主体验收敛:VS 扩展(VSSDK Sidecar + VSExtension)、Config GUI、AppHost 作为 Host Gateway 消费端接入
 - [ ] 移动端/Web/云中继作为消费形态,不要求移动设备本地执行工作负载
 
 #### 🤝 v0.9.0 · 多 Agent 成熟
@@ -202,7 +203,6 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 - [ ] 并行 fanout(激活 `maxConcurrentAgents` 并发闸门 + 结果 fan-in)
 - [ ] sub-agent 自主触发观测矩阵(多协议 × 多任务 × 多轮,诚实记录触发率)
 - [ ] 子树治理 / 预算切分 / 整树复盘完善
-- [ ] 多宿主体验:VS 扩展(VSSDK Sidecar + VSExtension)、Config GUI
 
 #### 🧬 v0.10.0 · 自演化基础设施(探索中)
 
@@ -387,7 +387,7 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 - [x] Multi-provider live: OpenAI Responses / Anthropic Messages / OpenAI-compatible Chat Completions
 - [x] Read-only tools open by default; write tools require human gate + approval + path sandbox
 - [x] Serial sub-agent mechanism (nested governed turn + structural gates against fork bombs)
-- [x] Cross-platform Release package + first-run bootstrap (`init`) + offline self-check (`doctor`) + network probe (`doctor --probe`)
+- [x] Directory-style Release packages + first-run bootstrap (`init`) + offline self-check (`doctor`) + network probe (`doctor --probe`); Windows has been smoke-tested, Linux/macOS packages are generated, and cross-platform smoke remains a follow-up validation item
 
 #### 🧩 v0.6.0 · Modularity opened
 
@@ -413,6 +413,7 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 - [ ] Remote control commands: submit message, steer, interrupt, resume, approval decision, all routed back through Host Gateway / Control Plane
 - [ ] Reference Remote Module implementation: replaceable remote send/receive module for HTTP/SSE/WebSocket, device pairing, short-lived tokens, session revocation
 - [ ] Remote safety boundary: remote clients do not directly access local workspace/runtime state, cannot bypass Kernel/Runtime, and high-risk actions still go through human gate
+- [ ] Multi-host experience convergence: VS extension (VSSDK Sidecar + VSExtension), Config GUI, and AppHost connect as Host Gateway consumers
 - [ ] Mobile, Web, and cloud relay are consumption forms; mobile devices are not required to execute local workloads
 
 #### 🤝 v0.9.0 · Multi-agent maturation
@@ -420,7 +421,6 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 - [ ] Parallel fanout (activate `maxConcurrentAgents` gate + result fan-in)
 - [ ] Sub-agent autonomous-trigger observation matrix (multi-protocol × multi-task × multi-round, honestly record trigger rate)
 - [ ] Sub-tree governance / budget split / whole-tree replay refinement
-- [ ] Multi-host experience: VS extension (VSSDK Sidecar + VSExtension), Config GUI
 
 #### 🧬 v0.10.0 · Self-evolution infrastructure (exploratory)
 
