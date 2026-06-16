@@ -201,7 +201,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 #### 🤝 v0.9.0 · 多 Agent 成熟
 
 - [ ] 并行 fanout(激活 `maxConcurrentAgents` 并发闸门 + 结果 fan-in)
-- [ ] sub-agent 自主触发观测矩阵(多协议 × 多任务 × 多轮,诚实记录触发率)
+- [ ] sub-agent 自主触发观测矩阵(v0.5 已完成串行基线观测:27 次 / 0 自主触发;v0.9 在并行 fanout 场景下扩展多协议 × 多任务 × 多轮观测,诚实记录触发率)
 - [ ] 子树治理 / 预算切分 / 整树复盘完善
 
 #### 🧬 v0.10.0 · 自演化基础设施(探索中)
@@ -419,7 +419,7 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 #### 🤝 v0.9.0 · Multi-agent maturation
 
 - [ ] Parallel fanout (activate `maxConcurrentAgents` gate + result fan-in)
-- [ ] Sub-agent autonomous-trigger observation matrix (multi-protocol × multi-task × multi-round, honestly record trigger rate)
+- [ ] Sub-agent autonomous-trigger observation matrix (v0.5 completed the serial baseline observation: 27 runs / 0 autonomous triggers; v0.9 expands observation across multi-protocol × multi-task × multi-round parallel fanout scenarios, honestly recording trigger rate)
 - [ ] Sub-tree governance / budget split / whole-tree replay refinement
 
 #### 🧬 v0.10.0 · Self-evolution infrastructure (exploratory)
