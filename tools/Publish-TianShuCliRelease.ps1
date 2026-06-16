@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $outputRootPath) {
 
 New-Item -ItemType Directory -Force -Path $stagingRoot, $packageRoot | Out-Null
 
-$archives = @()
+$archiveRecords = @()
 foreach ($rid in $RuntimeIdentifiers) {
     $packageName = "tianshu-cli-$Version-$rid"
     $publishDirectory = Join-Path $stagingRoot $packageName
@@ -92,24 +92,35 @@ foreach ($rid in $RuntimeIdentifiers) {
         }
     }
 
-    $archives += $archivePath
+    $archiveItem = Get-Item -LiteralPath $archivePath
+    $archiveHash = Get-FileHash -LiteralPath $archivePath -Algorithm SHA256
+    $archiveRecords += [ordered]@{
+        runtimeIdentifier = $rid
+        assetName = $archiveItem.Name
+        relativePath = $archiveItem.Name
+        sha256 = $archiveHash.Hash.ToLowerInvariant()
+        sizeBytes = $archiveItem.Length
+        entryName = Split-Path -Leaf $friendlyEntryPath
+    }
 }
 
 $manifest = [ordered]@{
+    schemaVersion = 1
     version = $Version
+    generatedAtUtc = [System.DateTimeOffset]::UtcNow.ToString("O")
     configuration = $Configuration
     runtimeIdentifiers = $RuntimeIdentifiers
     publishSingleFile = $false
     publishTrimmed = $false
     selfContained = $false
-    archives = @($archives | ForEach-Object { Resolve-FullPath $_ })
+    archives = @($archiveRecords)
 }
 
 $manifestPath = Join-Path $packageRoot "release-manifest.json"
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 Write-Host "TianShu CLI release packages:"
-foreach ($archive in $archives) {
-    Write-Host "  $archive"
+foreach ($archive in $archiveRecords) {
+    Write-Host "  $($archive.assetName)  $($archive.sha256)  $($archive.sizeBytes) bytes"
 }
 Write-Host "Manifest:"
 Write-Host "  $manifestPath"

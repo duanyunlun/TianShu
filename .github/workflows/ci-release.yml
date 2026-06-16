@@ -62,6 +62,10 @@ jobs:
         shell: pwsh
         run: ./tools/Publish-TianShuCliRelease.ps1 -Configuration Release -Version "${{ github.ref_name }}"
 
+      - name: Validate release manifest
+        shell: pwsh
+        run: ./tools/Test-TianShuReleaseManifest.ps1 -PackagesRoot artifacts/release/packages -Version "${{ github.ref_name }}"
+
       - name: Upload release packages artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,10 +73,45 @@ jobs:
           path: artifacts/release/packages/*
           if-no-files-found: error
 
+  release-smoke:
+    name: Release package smoke (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    needs: package-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-26
+            rid: osx-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          name: tianshu-cli-release-packages
+          path: artifacts/release/packages
+
+      - name: Smoke release package
+        shell: pwsh
+        run: ./tools/Test-TianShuCliReleasePackage.ps1 -PackagesRoot artifacts/release/packages -RuntimeIdentifier "${{ matrix.rid }}"
+
   github-release:
     name: Publish GitHub Release
     runs-on: windows-latest
-    needs: package-cli
+    needs:
+      - package-cli
+      - release-smoke
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
