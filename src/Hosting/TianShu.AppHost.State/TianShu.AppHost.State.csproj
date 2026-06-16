@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.AppHost.Tools.Runtime" />
+    <InternalsVisibleTo Include="TianShu.RuntimeComposition" />
+    <InternalsVisibleTo Include="TianShu.AppHost" />
+    <InternalsVisibleTo Include="TianShu.AppHost" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Runtime.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Integration.Tests" />
+    <InternalsVisibleTo Include="TianShu.Provider.OpenAI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Orchestration\TianShu.Contracts.Orchestration.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Execution\TianShu.Contracts.Execution.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Memory\TianShu.Contracts.Memory.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.Configuration\TianShu.Configuration.csproj" />
+    <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+  </ItemGroup>
+</Project>

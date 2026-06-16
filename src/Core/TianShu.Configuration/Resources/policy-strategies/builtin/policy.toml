@@ -1,0 +1,43 @@
+id = "builtin"
+display_name = "TianShu Builtin Policy Strategy"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[strategies]]
+id = "default"
+display_name = "Default Approval Policy Strategy"
+enabled = true
+type = "builtin"
+priority = 0
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+network_access = false
+allow_login_shell = true
+write_requires_approval_globs = ["**/*"]
+dangerous_command_patterns = ["rm", "del", "Remove-Item", "git reset", "git clean"]
+
+[[strategies.command_rules]]
+prefix = ["git", "reset"]
+decision = "ask"
+reason = "危险 git 重置命令需要审批"
+
+[[strategies.command_rules]]
+prefix = ["git", "clean"]
+decision = "ask"
+reason = "危险 git 清理命令需要审批"
+
+[[strategies.command_rules]]
+prefix = ["rm"]
+decision = "ask"
+reason = "删除命令需要审批"
+
+[[strategies.command_rules]]
+prefix = ["del"]
+decision = "ask"
+reason = "删除命令需要审批"
+
+[[strategies.command_rules]]
+prefix = ["Remove-Item"]
+decision = "ask"
+reason = "删除命令需要审批"

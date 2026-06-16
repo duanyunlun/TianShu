@@ -1,0 +1,107 @@
+# TianShu official builtin tool package manifest.
+# 官方内置工具包随 TianShu 一起安装；用户可在 tianshu.toml 中覆盖启停与实现选择。
+
+id = "builtin"
+display_name = "TianShu Builtin Tools"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[providers]]
+id = "shell"
+enabled = true
+type = "assembly"
+assembly_path = "./shell/TianShu.Tools.Shell.dll"
+provider_type = "TianShu.Tools.Shell.ShellToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "interaction"
+enabled = true
+type = "assembly"
+assembly_path = "./interaction/TianShu.Tools.Interaction.dll"
+provider_type = "TianShu.Tools.Interaction.InteractionToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "collaboration"
+enabled = true
+type = "assembly"
+assembly_path = "./collaboration/TianShu.Tools.Collaboration.dll"
+provider_type = "TianShu.Tools.Collaboration.CollaborationToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "fanout"
+enabled = true
+type = "assembly"
+assembly_path = "./fanout/TianShu.Tools.Fanout.dll"
+provider_type = "TianShu.Tools.Fanout.FanoutToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "code"
+enabled = true
+type = "assembly"
+assembly_path = "./code/TianShu.Tools.Code.dll"
+provider_type = "TianShu.Tools.Code.CodeToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "artifacts"
+enabled = true
+type = "assembly"
+assembly_path = "./artifacts/TianShu.Tools.Artifacts.dll"
+provider_type = "TianShu.Tools.Artifacts.ArtifactToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "search"
+enabled = true
+type = "assembly"
+assembly_path = "./search/TianShu.Tools.Search.dll"
+provider_type = "TianShu.Tools.Search.SearchToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "memory"
+enabled = true
+type = "assembly"
+assembly_path = "./memory/TianShu.Tools.Memory.dll"
+provider_type = "TianShu.Tools.Memory.MemoryToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "mcp_resources"
+enabled = true
+type = "assembly"
+assembly_path = "./mcp-resources/TianShu.Tools.McpResources.dll"
+provider_type = "TianShu.Tools.McpResources.McpResourceToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "filesystem"
+enabled = true
+type = "assembly"
+assembly_path = "./filesystem/TianShu.Tools.FileSystem.dll"
+provider_type = "TianShu.Tools.FileSystem.FileSystemToolProvider"
+priority = 10
+replace_existing = true
+
+[[providers]]
+id = "filesystem_mutating"
+enabled = true
+type = "assembly"
+assembly_path = "./filesystem-mutating/TianShu.Tools.FileSystemMutating.dll"
+provider_type = "TianShu.Tools.FileSystemMutating.MutatingFileSystemToolProvider"
+priority = 10
+replace_existing = true

@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tianshu.local/schema/tianshu-config.schema.json",
+  "title": "TianShu native configuration",
+  "description": "TianShu native TOML configuration projected as a JSON object. The authoritative human-readable contract is docs/config/tianshu-config-schema.md.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Native configuration schema major version.",
+      "default": 1
+    },
+    "profile": {
+      "type": "string",
+      "description": "Active profile name.",
+      "default": "default"
+    },
+    "app": {
+      "type": "object",
+      "description": "Application identity and locale settings.",
+      "additionalProperties": true
+    },
+    "providers": {
+      "type": "object",
+      "description": "Provider definitions keyed by provider id.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "models": {
+      "type": "object",
+      "description": "Model definitions keyed by model id.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "tool_profiles": {
+      "type": "object",
+      "description": "Tool profiles keyed by profile id. These profiles select, enable, or disable TianShu tool keys.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "enabled": {
+            "type": "array",
+            "description": "Tool keys explicitly enabled by this profile.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabled": {
+            "type": "array",
+            "description": "Tool keys explicitly disabled by this profile.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Per-tool switches, implementation selections, fallback policy, and tool-specific settings.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the tool is available in the current profile.",
+            "default": true
+          },
+          "provider": {
+            "type": "string",
+            "description": "Preferred tool provider id."
+          },
+          "implementation_id": {
+            "type": "string",
+            "description": "Preferred tool implementation id."
+          },
+          "implementation_kind": {
+            "type": "string",
+            "description": "Preferred implementation kind.",
+            "enum": ["managed", "externalprocess", "providerhosted", "mcpstdio", "mcphttp", "platformnative", "unavailable"]
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Implementation selection priority.",
+            "default": 0
+          },
+          "fallback": {
+            "type": "string",
+            "description": "Fallback strategy when the selected implementation is unavailable."
+          },
+          "approval": {
+            "type": "string",
+            "description": "Per-tool approval policy.",
+            "enum": ["never", "on-request", "on-failure", "always", "ask", "untrusted"]
+          }
+        }
+      }
+    },
+    "tool_providers": {
+      "type": "object",
+      "description": "Third-party tool provider registrations keyed by provider id.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this tool provider registration is enabled.",
+            "default": true
+          },
+          "type": {
+            "type": "string",
+            "description": "Tool provider source type.",
+            "enum": ["assembly", "package", "plugin"]
+          },
+          "assembly_path": {
+            "type": "string",
+            "description": "Local assembly path for assembly-based providers."
+          },
+          "provider_type": {
+            "type": "string",
+            "description": "Full .NET type name implementing ITianShuToolProvider."
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Provider registration priority.",
+            "default": 0
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Identity memory profiles, providers, spaces, overlays, and extraction settings.",
+      "additionalProperties": true
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Diagnostics collection, artifacts, sinks, and telemetry switches.",
+      "additionalProperties": true
+    }
+  }
+}

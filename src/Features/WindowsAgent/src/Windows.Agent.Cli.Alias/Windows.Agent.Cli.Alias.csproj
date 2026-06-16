@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Windows.Agent.Cli</RootNamespace>
+    <AssemblyName>Windows.Agent.Cli.Alias</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- `windows-agent` 的简写别名：`wa`（以 dotnet tool 形式发布）。 -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wa</ToolCommandName>
+    <PackageId>Windows.Agent.Cli.Alias</PackageId>
+    <PackageVersion>$(Version)</PackageVersion>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>AI; Windows; Desktop; Automation; CLI</PackageTags>
+    <Description>Alias CLI (wa) for Windows.Agent.Cli.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Windows.Agent.Cli\Windows.Agent.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

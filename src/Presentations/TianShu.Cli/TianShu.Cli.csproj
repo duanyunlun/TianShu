@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TianShu.Cli</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.Cli.Tests" />
+    <Using Include="TianShu.Contracts.Primitives" />
+    <Using Include="TianShu.Contracts.Primitives.StructuredValue" Alias="ControlPlaneStructuredValue" />
+    <Using Include="TianShu.Contracts.Primitives.StructuredValueKind" Alias="ControlPlaneStructuredValueKind" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Host\TianShu.Contracts.Host.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.ControlPlane\TianShu.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.RuntimeComposition\TianShu.RuntimeComposition.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.SubAgent\TianShu.SubAgent.csproj" />
+    <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\Hosting\TianShu.AppHost.Catalog\TianShu.AppHost.Catalog.csproj" />
+    <ProjectReference Include="..\..\Hosting\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
+    <ProjectReference Include="..\..\Analyzers\TianShu.ArchitectureAnalyzers\TianShu.ArchitectureAnalyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Anthropic\TianShu.Provider.Anthropic.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Google\TianShu.Provider.Google.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAICompatible\TianShu.Provider.OpenAICompatible.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" />
+  </ItemGroup>
+</Project>
+
+

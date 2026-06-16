@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openworkbench.dev/schemas/tool-definition.json",
+  "title": "OpenWorkbench Tool Definition",
+  "description": "工具定义 JSON Schema",
+  "type": "object",
+  "required": ["name", "displayName", "description", "category", "version", "inputSchema"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "工具唯一标识（小写字母、数字、下划线）"
+    },
+    "displayName": {
+      "type": "string",
+      "description": "工具显示名称"
+    },
+    "description": {
+      "type": "string",
+      "description": "工具功能描述，供 AI 理解其用途"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["builtin", "mcp", "skill", "agent", "remote"],
+      "description": "工具类别"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "版本号（语义化版本）"
+    },
+    "author": {
+      "type": "string",
+      "description": "作者"
+    },
+    "license": {
+      "type": "string",
+      "description": "许可证"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "标签，用于分类和搜索"
+    },
+    "requiredMode": {
+      "type": "string",
+      "enum": ["AgentFull", "AgentLight", "Plan", "Chat"],
+      "default": "AgentFull",
+      "description": "最低运行模式要求"
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "canEditFiles": {
+          "type": "boolean",
+          "default": false
+        },
+        "canRunCommands": {
+          "type": "boolean",
+          "default": false
+        },
+        "requiresNetwork": {
+          "type": "boolean",
+          "default": false
+        },
+        "requiresAgentFull": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "inputSchema": {
+      "type": "object",
+      "description": "输入参数 JSON Schema",
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "description": "输出结果 JSON Schema"
+    },
+    "examples": {
+      "type": "array",
+      "description": "使用示例",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "input": { "type": "object" },
+          "output": { "type": "object" }
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "description": "实现配置（根据 category 不同）",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "实现类型（约定值：host_builtin/mcp/script/agent/http）"
+        },
+        "handler": {
+          "type": "string",
+          "description": "实现处理器（如 WebSearchHandler / GitHubIssuesHandler / ApplyPatchHandler）"
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Remote API 基地址（等价于 url）"
+        },
+        "url": { "type": "string" },
+        "authType": { "type": "string" },
+        "authSecretRef": { "type": "string" },
+        "command": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "script": { "type": "string" },
+        "runtime": { "type": "string" },
+        "references": { "type": "array", "items": { "type": "string" } },
+        "providerId": { "type": "string" },
+        "model": { "type": "string" },
+        "systemPrompt": { "type": "string" },
+        "roleId": { "type": "string" },
+        "mode": { "type": "string" },
+        "method": { "type": "string" },
+        "headers": { "type": "object" }
+      }
+    }
+  }
+}

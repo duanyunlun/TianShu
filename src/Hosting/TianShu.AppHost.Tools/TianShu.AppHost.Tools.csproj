@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="CodeMode\runner.cjs" LogicalName="TianShu.AppHost.Tools.Resources.code-mode.runner.cjs" />
+    <EmbeddedResource Include="CodeMode\bridge.js" LogicalName="TianShu.AppHost.Tools.Resources.code-mode.bridge.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.AppHost.Tools.Runtime" />
+    <InternalsVisibleTo Include="TianShu.AppHost" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Runtime.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Integration.Tests" />
+    <InternalsVisibleTo Include="TianShu.Provider.OpenAI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\TianShu.Configuration\TianShu.Configuration.csproj" />
+    <ProjectReference Include="..\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Catalog\TianShu.Contracts.Catalog.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Collaboration\TianShu.Contracts.Collaboration.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Execution\TianShu.Contracts.Execution.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Interactions\TianShu.Contracts.Interactions.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Participants\TianShu.Contracts.Participants.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Primitives\TianShu.Contracts.Primitives.csproj" />
+  </ItemGroup>
+</Project>

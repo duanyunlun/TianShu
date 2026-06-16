@@ -1,0 +1,37 @@
+id = "builtin"
+display_name = "TianShu Builtin Model Providers"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[adapters]]
+id = "openai_chat_completions"
+display_name = "OpenAI-compatible Chat Completions"
+enabled = true
+type = "assembly"
+assembly_path = "./openai-compatible/TianShu.Provider.OpenAICompatible.dll"
+priority = 10
+
+[[adapters]]
+id = "openai_responses"
+display_name = "OpenAI Responses"
+enabled = true
+type = "assembly"
+assembly_path = "./openai/TianShu.Provider.OpenAI.dll"
+priority = 20
+
+[[adapters]]
+id = "anthropic_messages"
+display_name = "Anthropic Messages"
+enabled = true
+type = "assembly"
+assembly_path = "./anthropic/TianShu.Provider.Anthropic.dll"
+priority = 30
+
+[[adapters]]
+id = "google_generative"
+display_name = "Google Generative"
+enabled = true
+type = "assembly"
+assembly_path = "./google/TianShu.Provider.Google.dll"
+priority = 40

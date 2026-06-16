@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\TianShu.Contracts.Primitives\TianShu.Contracts.Primitives.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Collaboration\TianShu.Contracts.Collaboration.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Interactions\TianShu.Contracts.Interactions.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Kernel\TianShu.Contracts.Kernel.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Participants\TianShu.Contracts.Participants.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Provider\TianShu.Contracts.Provider.csproj" />
+    <ProjectReference Include="..\TianShu.Contracts.Tools\TianShu.Contracts.Tools.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Contracts\TianShu.Contracts.Modules\TianShu.Contracts.Modules.csproj" />
+    <ProjectReference Include="..\..\src\Contracts\TianShu.Contracts.Tools\TianShu.Contracts.Tools.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.OpenAICompatible\TianShu.Provider.OpenAICompatible.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Anthropic\TianShu.Provider.Anthropic.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Google\TianShu.Provider.Google.csproj" />
+  </ItemGroup>
+
+</Project>

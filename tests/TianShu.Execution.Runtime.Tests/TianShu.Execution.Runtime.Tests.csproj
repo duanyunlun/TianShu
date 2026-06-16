@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Core\TianShu.ArtifactStore\TianShu.ArtifactStore.csproj" />
+    <ProjectReference Include="..\..\src\Core\TianShu.IdentityMemory\TianShu.IdentityMemory.csproj" />
+    <ProjectReference Include="..\..\src\Hosting\TianShu.AppHost\TianShu.AppHost.csproj" />
+    <ProjectReference Include="..\..\src\Core\TianShu.RuntimeComposition\TianShu.RuntimeComposition.csproj" />
+    <ProjectReference Include="..\..\src\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Hosting\TianShu.AppHost.State\TianShu.AppHost.State.csproj" />
+    <ProjectReference Include="..\..\src\Hosting\TianShu.AppHost.Tools\TianShu.AppHost.Tools.csproj" />
+    <ProjectReference Include="..\..\src\Hosting\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
+    <ProjectReference Include="..\..\src\Contracts\TianShu.Contracts.Orchestration\TianShu.Contracts.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Anthropic\TianShu.Provider.Anthropic.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.OpenAICompatible\TianShu.Provider.OpenAICompatible.csproj" />
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" />
+    <ProjectReference Include="..\..\src\Tools\TianShu.Tools.Collaboration\TianShu.Tools.Collaboration.csproj" />
+    <ProjectReference Include="..\..\src\Tools\TianShu.Tools.Fanout\TianShu.Tools.Fanout.csproj" />
+    <ProjectReference Include="..\..\src\Tools\TianShu.Tools.Interaction\TianShu.Tools.Interaction.csproj" />
+    <ProjectReference Include="..\..\src\Tools\TianShu.Tools.Search\TianShu.Tools.Search.csproj" />
+  </ItemGroup>
+
+</Project>

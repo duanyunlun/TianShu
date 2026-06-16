@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>TianShu.Provider.BootstrapLoaderFixtures</AssemblyName>
+    <RootNamespace>TianShu.Provider.BootstrapLoaderFixtures</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

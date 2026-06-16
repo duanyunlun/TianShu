@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.Provider.OpenAI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Configuration\TianShu.Contracts.Configuration.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Conversations\TianShu.Contracts.Conversations.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Modules\TianShu.Contracts.Modules.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Primitives\TianShu.Contracts.Primitives.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Provider\TianShu.Contracts.Provider.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Tools\TianShu.Contracts.Tools.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,15 @@
+id = "builtin"
+display_name = "TianShu Builtin Artifact Store"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[stores]]
+id = "local-filesystem"
+display_name = "Local FileSystem Artifact Store"
+enabled = true
+type = "filesystem"
+root = "./data"
+max_history_versions = 20
+enable_cross_process_sync = true
+priority = 0

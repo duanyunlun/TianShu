@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.Execution.Runtime" />
+    <InternalsVisibleTo Include="TianShu.AppHost" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tests" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Catalog" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tools" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tools.Runtime" />
+    <InternalsVisibleTo Include="TianShu.RuntimeComposition" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Catalog\TianShu.Contracts.Catalog.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Sessions\TianShu.Contracts.Sessions.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.Configuration\TianShu.Configuration.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,38 @@
+using TianShu.Configuration;
+using TianShu.Contracts.Sessions;
+
+namespace TianShu.RuntimeComposition;
+
+/// <summary>
+/// TianShu 运行时配置加载组合入口。
+/// Runtime composition entry point for TianShu configuration loading.
+/// </summary>
+public sealed class RuntimeConfigurationComposition
+{
+    private readonly TianShuTomlConfigurationLoader loader = new();
+
+    /// <summary>
+    /// 加载有效配置快照。
+    /// Loads an effective configuration snapshot.
+    /// </summary>
+    public ResolvedTianShuConfig Load(
+        string? configFilePath,
+        string? profileOverride,
+        IReadOnlyDictionary<string, string>? configOverrides = null,
+        string? workingDirectory = null)
+        => loader.Load(configFilePath, profileOverride, configOverrides, workingDirectory);
+
+    /// <summary>
+    /// 将配置快照应用到 runtime 初始化命令。
+    /// Applies a configuration snapshot to the runtime initialization command.
+    /// </summary>
+    public static void ApplyToOptions(ControlPlaneInitializeRuntimeCommand options, ResolvedTianShuConfig config)
+        => TianShuTomlConfigurationLoader.ApplyToOptions(options, config);
+
+    /// <summary>
+    /// 解析默认用户级配置路径。
+    /// Resolves the default user-level configuration path.
+    /// </summary>
+    public static string ResolveDefaultPath()
+        => TianShuTomlConfigurationLoader.ResolveDefaultPath();
+}

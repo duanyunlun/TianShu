@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Windows.Agent.Cli</RootNamespace>
+    <AssemblyName>Windows.Agent.Cli</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- 对外入口收敛到 CLI；以 dotnet tool 形式发布。 -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>windows-agent</ToolCommandName>
+    <PackageId>Windows.Agent.Cli</PackageId>
+    <PackageVersion>$(Version)</PackageVersion>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>AI; Windows; Desktop; Automation; CLI</PackageTags>
+    <Description>A .NET-based Windows desktop automation CLI toolkit for LLMs.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Windows.Agent\Windows.Agent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

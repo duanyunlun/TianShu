@@ -1,0 +1,2062 @@
+<UserControl x:Class="TianShu.VSSDK.VSExtension.TianShuConversationToolWindowControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:platformui="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             Loaded="OnLoaded"
+             Unloaded="OnUnloaded"
+             PreviewKeyDown="OnRootPreviewKeyDown"
+             d:DesignHeight="860"
+             d:DesignWidth="560"
+             Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+             Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="SurfaceBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10" />
+        </Style>
+
+        <Style x:Key="HeaderButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.95" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.82" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.38" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GhostActionButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderButtonStyle}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
+        </Style>
+
+        <Style x:Key="InspectorCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource GhostActionButtonStyle}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="InspectorPrimaryTitleTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="InspectorSectionTitleTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="InspectorHelperTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="Opacity" Value="0.58" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="InspectorDividerStyle" TargetType="Border">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Margin" Value="0,10,0,14" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="Opacity" Value="0.7" />
+        </Style>
+
+        <Style x:Key="InspectorExpanderStyle" TargetType="Expander">
+            <Setter Property="Margin" Value="10,4,10,8" />
+            <Setter Property="IsExpanded" Value="True" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Padding" Value="10,4" />
+        </Style>
+
+        <Style x:Key="SendOptionButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderButtonStyle}">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="StatusSummaryTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Opacity" Value="0.62" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="AnimatedStatusSummaryTextStyle" TargetType="TextBlock" BasedOn="{StaticResource StatusSummaryTextStyle}">
+            <Setter Property="OpacityMask">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#88FFFFFF" Offset="0" />
+                        <GradientStop Color="#FFFFFFFF" Offset="0.5" />
+                        <GradientStop Color="#88FFFFFF" Offset="1" />
+                        <LinearGradientBrush.RelativeTransform>
+                            <TranslateTransform X="-1.2" />
+                        </LinearGradientBrush.RelativeTransform>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsBusy}" Value="False">
+                    <Setter Property="OpacityMask">
+                        <Setter.Value>
+                            <SolidColorBrush Color="#FFFFFFFF" />
+                        </Setter.Value>
+                    </Setter>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter Property="Opacity" Value="0.82" />
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard x:Name="StatusSummaryWaveStoryboard">
+                            <Storyboard RepeatBehavior="Forever">
+                                <DoubleAnimation Storyboard.TargetProperty="(TextBlock.OpacityMask).(LinearGradientBrush.RelativeTransform).(TranslateTransform.X)"
+                                                 From="-1.2"
+                                                 To="1.2"
+                                                 Duration="0:0:1.6" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="StatusSummaryWaveStoryboard" />
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ChipButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderButtonStyle}">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+        </Style>
+
+        <Style x:Key="ThreadTileButtonStyle" TargetType="Button" BasedOn="{StaticResource HeaderButtonStyle}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="ThreadItemActionButtonStyle" TargetType="Button" BasedOn="{StaticResource GhostActionButtonStyle}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="TextBoxStyle" TargetType="TextBox">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="CaretBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <Style x:Key="InlineInputStyle" TargetType="TextBox" BasedOn="{StaticResource TextBoxStyle}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="ListBoxItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="ItemChrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}" />
+                                <Setter TargetName="ItemChrome" Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                                <Setter TargetName="ItemChrome" Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ItemChrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ListBoxStyle" TargetType="ListBox">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="2" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ListBoxItemStyle}" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        </Style>
+
+        <Style x:Key="ConversationListBoxItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ConversationListBoxStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ConversationListBoxItemStyle}" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
+            <Setter Property="ScrollViewer.IsDeferredScrollingEnabled" Value="False" />
+            <!-- 对话项高度会随 FlowDocument/Expander 流式变化，回收虚拟化会导致测量失真并出现文字重叠。 -->
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="False" />
+        </Style>
+
+        <Style x:Key="ConversationDocumentViewerStyle" TargetType="FlowDocumentScrollViewer">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="IsToolBarVisible" Value="False" />
+            <Setter Property="IsSelectionEnabled" Value="True" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Hidden" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <EventSetter Event="PreviewMouseWheel"
+                         Handler="OnConversationEmbeddedDocumentPreviewMouseWheel" />
+        </Style>
+
+        <Style x:Key="ConversationEmbeddedDocumentViewerStyle"
+               TargetType="FlowDocumentScrollViewer"
+               BasedOn="{StaticResource ConversationDocumentViewerStyle}">
+            <Setter Property="MaxHeight" Value="180" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="ConversationReasoningExpanderStyle" TargetType="Expander">
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+
+        <Style x:Key="ConversationToolCallExpanderStyle" TargetType="Expander" BasedOn="{StaticResource ConversationReasoningExpanderStyle}">
+            <Setter Property="Margin" Value="0,6,0,0" />
+        </Style>
+
+        <Style x:Key="InspectorEventListBoxItemStyle" TargetType="ListBoxItem" BasedOn="{StaticResource ListBoxItemStyle}">
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+
+        <Style x:Key="ComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemChrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}" />
+                                <Setter TargetName="ItemChrome" Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                                <Setter TargetName="ItemChrome" Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ComboBoxToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Text="▾"
+                                       FontSize="12"
+                                       Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.86" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Opacity" Value="0.72" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ComboBoxItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="ComboChrome"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="28" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0"
+                                                      Margin="8,0,4,0"
+                                                      VerticalAlignment="Center"
+                                                      HorizontalAlignment="Left"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" />
+                                    <ToggleButton Grid.Column="1"
+                                                  Style="{StaticResource ComboBoxToggleButtonStyle}"
+                                                  Focusable="False"
+                                                  ClickMode="Press"
+                                                  IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+                            <Popup AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   PopupAnimation="Fade">
+                                <Border Margin="0,2,0,0"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                        Padding="2"
+                                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                        BorderThickness="1"
+                                        CornerRadius="4">
+                                    <ScrollViewer SnapsToDevicePixels="True">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ComboChrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+        </Style>
+
+        <DataTemplate x:Key="ThreadListItemTemplate">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding TitleText}"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Margin="0,3,0,0"
+                               Text="{Binding MetaText}"
+                               FontSize="11"
+                               Opacity="0.58"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <StackPanel x:Name="ThreadItemActions"
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Visibility="Hidden">
+                    <Button x:Name="ResumeThreadItemButton"
+                            Content="↺"
+                            Style="{StaticResource ThreadItemActionButtonStyle}"
+                            ToolTip="恢复"
+                            Click="OnResumeThreadItemClick" />
+                    <Button x:Name="ArchiveThreadItemButton"
+                            Content="↓"
+                            Style="{StaticResource ThreadItemActionButtonStyle}"
+                            ToolTip="归档"
+                            Click="OnArchiveThreadItemClick" />
+                    <Button x:Name="UnarchiveThreadItemButton"
+                            Content="↑"
+                            Style="{StaticResource ThreadItemActionButtonStyle}"
+                            ToolTip="取消归档"
+                            Click="OnUnarchiveThreadItemClick"
+                            Visibility="Collapsed" />
+                    <Button x:Name="DeleteThreadItemButton"
+                            Content="✕"
+                            Style="{StaticResource ThreadItemActionButtonStyle}"
+                            ToolTip="删除"
+                            Click="OnDeleteThreadItemClick" />
+                </StackPanel>
+            </Grid>
+
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsMouseOver}" Value="True">
+                    <Setter TargetName="ThreadItemActions" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=IsSelected}" Value="True">
+                    <Setter TargetName="ThreadItemActions" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsArchived}" Value="True">
+                    <Setter TargetName="ArchiveThreadItemButton" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="UnarchiveThreadItemButton" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsCurrentThread}" Value="True">
+                    <Setter TargetName="ResumeThreadItemButton" Property="IsEnabled" Value="False" />
+                    <Setter TargetName="ResumeThreadItemButton" Property="Opacity" Value="0.35" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding DataContext.CanRefreshThreads, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                    <Setter TargetName="ResumeThreadItemButton" Property="IsEnabled" Value="False" />
+                    <Setter TargetName="ArchiveThreadItemButton" Property="IsEnabled" Value="False" />
+                    <Setter TargetName="UnarchiveThreadItemButton" Property="IsEnabled" Value="False" />
+                    <Setter TargetName="DeleteThreadItemButton" Property="IsEnabled" Value="False" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SidecarEventItemTemplate">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Row="0"
+                        Grid.RowSpan="2"
+                        Grid.Column="0"
+                        Margin="0,0,10,0"
+                        Padding="6,2"
+                        VerticalAlignment="Top"
+                        CornerRadius="4"
+                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}">
+                    <TextBlock Text="{Binding SequenceText}"
+                               FontSize="10.5"
+                               FontWeight="SemiBold"
+                               Opacity="0.78" />
+                </Border>
+
+                <TextBlock Grid.Row="0"
+                           Grid.Column="1"
+                           Text="{Binding EventTypeText}"
+                           FontSize="11.5"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Row="0"
+                           Grid.Column="2"
+                           Margin="10,0,0,0"
+                           Text="{Binding TimestampText}"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           TextAlignment="Right"
+                           FontSize="10.5"
+                           Opacity="0.54" />
+
+                <TextBlock Grid.Row="1"
+                           Grid.Column="1"
+                           Grid.ColumnSpan="2"
+                           Margin="0,4,0,0"
+                           Text="{Binding SummaryText}"
+                           FontSize="11"
+                           Opacity="0.84"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="0" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="10,8,10,8"
+                BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                BorderThickness="0,0,0,1"
+                Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}">
+            <StackPanel>
+                <TextBlock Margin="0,3,0,0"
+                           Text="{Binding CurrentThreadTitle}"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="10,8,10,6">
+            <Border Style="{StaticResource SurfaceBorderStyle}" Padding="0">
+                <Grid>
+                    <Grid Visibility="{Binding ShowInitializationState, Converter={StaticResource BoolToVisibility}}">
+                        <Border Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                CornerRadius="4"
+                                Padding="18">
+                            <StackPanel MaxWidth="360"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="正在初始化 TianShu"
+                                           FontSize="23"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Center" />
+                                <TextBlock Margin="0,10,0,0"
+                                           Text="{Binding StatusSummaryText}"
+                                           FontSize="13"
+                                           Opacity="0.66"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap" />
+                                <ProgressBar Margin="0,14,0,0"
+                                             Height="4"
+                                             IsIndeterminate="True"
+                                             Visibility="{Binding IsInitializationInProgress, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <Grid Visibility="{Binding ShowHomeState, Converter={StaticResource BoolToVisibility}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12,10,12,10">
+                                <Border Padding="10"
+                                        Style="{StaticResource SurfaceBorderStyle}">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="False">
+                                            <StackPanel DockPanel.Dock="Left">
+                                                <TextBlock Text="最近会话"
+                                                           FontSize="13"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Text="{Binding RecentThreadsSummaryText}"
+                                                           FontSize="11"
+                                                           Opacity="0.62"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Top">
+                                                <Button Content="设置"
+                                                        Style="{StaticResource HeaderButtonStyle}"
+                                                        Click="OnOpenConversationPanelClick" />
+                                                <Button Content="刷新"
+                                                        Style="{StaticResource HeaderButtonStyle}"
+                                                        Click="OnRefreshThreadsClick"
+                                                        IsEnabled="{Binding CanRefreshThreads}" />
+                                                <Button Content="清空"
+                                                        Style="{StaticResource HeaderButtonStyle}"
+                                                        Click="OnClearAllThreadsClick"
+                                                        IsEnabled="{Binding CanClearAllThreads}" />
+                                                <Button Content="{Binding RecentThreadsToggleText}"
+                                                        Style="{StaticResource HeaderButtonStyle}"
+                                                        Margin="0"
+                                                        Click="OnToggleRecentThreadsViewClick"
+                                                        IsEnabled="{Binding CanToggleRecentThreads}"
+                                                        Visibility="{Binding CanToggleRecentThreads, Converter={StaticResource BoolToVisibility}}" />
+                                            </WrapPanel>
+                                        </DockPanel>
+
+                                        <TextBlock Margin="0,10,0,0"
+                                                   Text="还没有历史会话记录。发送第一条消息后，这里会自动出现会话列表。"
+                                                   TextWrapping="Wrap"
+                                                   Opacity="0.58"
+                                                   Visibility="{Binding HasNoRecentThreads, Converter={StaticResource BoolToVisibility}}" />
+
+                                        <ListBox Margin="0,10,0,0"
+                                                 MinHeight="124"
+                                                 MaxHeight="220"
+                                                 Style="{StaticResource ListBoxStyle}"
+                                                 ItemsSource="{Binding VisibleRecentThreads}"
+                                                 SelectedItem="{Binding SelectedThread}"
+                                                 ItemTemplate="{StaticResource ThreadListItemTemplate}"
+                                                 Visibility="{Binding HasRecentThreads, Converter={StaticResource BoolToVisibility}}">
+                                        </ListBox>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid Visibility="{Binding ShowThreadState, Converter={StaticResource BoolToVisibility}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                                Margin="12,10,12,0"
+                                Padding="0,0,0,10"
+                                BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding StatusSummaryText}"
+                                           Style="{StaticResource AnimatedStatusSummaryTextStyle}" />
+                                <Button Grid.Column="1"
+                                        Content="面板"
+                                        Style="{StaticResource GhostActionButtonStyle}"
+                                        Margin="10,0,0,0"
+                                        HorizontalAlignment="Right"
+                                        Click="OnOpenConversationPanelClick" />
+                            </Grid>
+                        </Border>
+
+                        <ListBox x:Name="MessagesListBox"
+                                 Grid.Row="1"
+                                 Margin="12,10,12,12"
+                                 Style="{StaticResource ConversationListBoxStyle}"
+                                 ItemsSource="{Binding Messages}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid x:Name="MessageRoot"
+                                          Margin="0,0,0,14"
+                                          TextElement.Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}">
+                                        <Border x:Name="PlainMessageCard"
+                                                MaxWidth="720"
+                                                HorizontalAlignment="Left"
+                                                Padding="0"
+                                                CornerRadius="4"
+                                                Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                BorderThickness="0"
+                                                TextElement.Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                Visibility="{Binding ShowPlainTextContent, Converter={StaticResource BoolToVisibility}}">
+                                            <StackPanel>
+                                                <TextBlock x:Name="MessageRoleLabel"
+                                                           Text="{Binding Role}"
+                                                           FontSize="10.5"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                           Opacity="0.44"
+                                                           Visibility="Collapsed" />
+                                                <TextBlock Margin="0,5,0,0"
+                                                           Text="{Binding DisplayContent}"
+                                                           TextWrapping="Wrap"
+                                                           FontSize="13"
+                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                           LineHeight="20" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <StackPanel x:Name="AssistantMessageRoot"
+                                                    HorizontalAlignment="Stretch"
+                                                    TextElement.Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                    Visibility="{Binding ShowAssistantLayout, Converter={StaticResource BoolToVisibility}}">
+                                            <TextBlock Text="{Binding Role}"
+                                                       FontSize="10.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                       Opacity="0.44" />
+
+                                            <StackPanel Margin="0,5,0,0"
+                                                        Visibility="{Binding ShowInlineReasoningSection, Converter={StaticResource BoolToVisibility}}">
+                                                <ItemsControl Margin="0,0,0,0"
+                                                              ItemsSource="{Binding ProcessSegments}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Margin="0,0,0,8">
+                                                                <!-- 流式阶段改用纯文本展示，避免 WPF 高频重建 FlowDocument 时出现叠字。 -->
+                                                                <TextBlock Text="{Binding Text}"
+                                                                           TextWrapping="Wrap"
+                                                                           FontSize="13"
+                                                                           LineHeight="20"
+                                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                                           Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
+
+                                                                <Expander Style="{StaticResource ConversationToolCallExpanderStyle}"
+                                                                          IsExpanded="{Binding IsToolCallsExpanded, Mode=TwoWay}"
+                                                                          Visibility="{Binding HasToolCalls, Converter={StaticResource BoolToVisibility}}">
+                                                                    <Expander.Header>
+                                                                        <TextBlock Text="{Binding ToolCallsHeaderText}"
+                                                                                   FontSize="11"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                                                   Opacity="0.56" />
+                                                                    </Expander.Header>
+                                                                    <ItemsControl Margin="0,6,0,0"
+                                                                                  ItemsSource="{Binding ToolCalls}">
+                                                                        <ItemsControl.ItemTemplate>
+                                                                            <DataTemplate>
+                                                                                <Border Margin="0,0,0,6"
+                                                                                        Padding="8,6"
+                                                                                        HorizontalAlignment="Stretch"
+                                                                                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                                                                                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                                                                        BorderThickness="1"
+                                                                                        CornerRadius="4">
+                                                                                    <StackPanel>
+                                                                                        <TextBlock FontSize="11.5"
+                                                                                                   FontWeight="SemiBold"
+                                                                                                   Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}">
+                                                                                            <Run Text="已运行 " />
+                                                                                            <Run Text="{Binding DisplayName, Mode=OneWay}" />
+                                                                                            <Run Text=" · " />
+                                                                                            <Run Text="{Binding StatusText, Mode=OneWay}" />
+                                                                                        </TextBlock>
+                                                                                        <ScrollViewer Margin="0,4,0,0"
+                                                                                                      MaxHeight="180"
+                                                                                                      VerticalScrollBarVisibility="Auto"
+                                                                                                      HorizontalScrollBarVisibility="Disabled"
+                                                                                                      Visibility="{Binding HasOutputText, Converter={StaticResource BoolToVisibility}}">
+                                                                                            <TextBlock Text="{Binding OutputText}"
+                                                                                                       TextWrapping="Wrap"
+                                                                                                       FontSize="12.5"
+                                                                                                       FontFamily="Consolas"
+                                                                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+                                                                                        </ScrollViewer>
+                                                                                    </StackPanel>
+                                                                                </Border>
+                                                                            </DataTemplate>
+                                                                        </ItemsControl.ItemTemplate>
+                                                                    </ItemsControl>
+                                                                </Expander>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <TextBlock Text="{Binding PendingStreamingContent}"
+                                                           TextWrapping="Wrap"
+                                                           FontSize="13"
+                                                           LineHeight="20"
+                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                           Visibility="{Binding ShowPendingDraftFallback, Converter={StaticResource BoolToVisibility}}" />
+                                            </StackPanel>
+
+                                            <Expander Margin="0,5,0,0"
+                                                      Style="{StaticResource ConversationReasoningExpanderStyle}"
+                                                      IsExpanded="{Binding IsReasoningExpanded, Mode=TwoWay}"
+                                                      Visibility="{Binding ShowCollapsibleReasoningSection, Converter={StaticResource BoolToVisibility}}">
+                                                <Expander.Header>
+                                                    <TextBlock Text="{Binding ReasoningHeaderText}"
+                                                               FontSize="11.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                               Opacity="0.62" />
+                                                </Expander.Header>
+                                                <StackPanel Margin="0,6,0,0">
+                                                    <ItemsControl Margin="0,0,0,0"
+                                                                  ItemsSource="{Binding ProcessSegments}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <StackPanel Margin="0,0,0,8">
+                                                                    <!-- 完成态 reasoning 也改用纯文本，避免 VS 宿主里的 FlowDocument 继续出现叠字。 -->
+                                                                    <TextBlock Text="{Binding Text}"
+                                                                               TextWrapping="Wrap"
+                                                                               FontSize="13"
+                                                                               LineHeight="20"
+                                                                               Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                                               Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
+
+                                                                    <Expander Style="{StaticResource ConversationToolCallExpanderStyle}"
+                                                                              IsExpanded="{Binding IsToolCallsExpanded, Mode=TwoWay}"
+                                                                              Visibility="{Binding HasToolCalls, Converter={StaticResource BoolToVisibility}}">
+                                                                        <Expander.Header>
+                                                                            <TextBlock Text="{Binding ToolCallsHeaderText}"
+                                                                                       FontSize="11"
+                                                                                       FontWeight="SemiBold"
+                                                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                                                       Opacity="0.56" />
+                                                                        </Expander.Header>
+                                                                        <ItemsControl Margin="0,6,0,0"
+                                                                                      ItemsSource="{Binding ToolCalls}">
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate>
+                                                                                    <Border Margin="0,0,0,6"
+                                                                                            Padding="8,6"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                                                                                            BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                                                                            BorderThickness="1"
+                                                                                            CornerRadius="4">
+                                                                                        <StackPanel>
+                                                                                            <TextBlock FontSize="11.5"
+                                                                                                       FontWeight="SemiBold"
+                                                                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}">
+                                                                                                <Run Text="已运行 " />
+                                                                                                <Run Text="{Binding DisplayName, Mode=OneWay}" />
+                                                                                                <Run Text=" · " />
+                                                                                                <Run Text="{Binding StatusText, Mode=OneWay}" />
+                                                                                            </TextBlock>
+                                                                                            <ScrollViewer Margin="0,4,0,0"
+                                                                                                          MaxHeight="180"
+                                                                                                          VerticalScrollBarVisibility="Auto"
+                                                                                                          HorizontalScrollBarVisibility="Disabled"
+                                                                                                          Visibility="{Binding HasOutputText, Converter={StaticResource BoolToVisibility}}">
+                                                                                                <TextBlock Text="{Binding OutputText}"
+                                                                                                           TextWrapping="Wrap"
+                                                                                                           FontSize="12.5"
+                                                                                                           FontFamily="Consolas"
+                                                                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}" />
+                                                                                            </ScrollViewer>
+                                                                                        </StackPanel>
+                                                                                    </Border>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                    </Expander>
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Expander>
+
+                                            <Grid Margin="0,10,0,6"
+                                                  Visibility="{Binding ShowAssistantRunSummary, Converter={StaticResource BoolToVisibility}}">
+                                                <Border Height="1"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+                                                <TextBlock HorizontalAlignment="Center"
+                                                           Padding="10,0"
+                                                           Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                                           Text="{Binding RunSummaryText}"
+                                                           FontSize="10.5"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                           Opacity="0.56" />
+                                            </Grid>
+
+                                            <FlowDocumentScrollViewer Margin="0,4,0,0"
+                                                                      Style="{StaticResource ConversationDocumentViewerStyle}"
+                                                                      Document="{Binding FinalDocument}"
+                                                                      Visibility="{Binding ShowAssistantFinalContent, Converter={StaticResource BoolToVisibility}}" />
+
+                                            <TextBlock Margin="0,6,0,0"
+                                                       Text="{Binding AssistantPendingText, StringFormat=当前状态：{0}}"
+                                                       FontSize="12.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                       Opacity="0.62"
+                                                       Visibility="{Binding ShowAssistantPendingText, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsSpacerEntry}" Value="True">
+                                            <Setter TargetName="MessageRoot"
+                                                    Property="Visibility"
+                                                    Value="Collapsed" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Variant}" Value="user">
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="HorizontalAlignment"
+                                                    Value="Right" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="Padding"
+                                                    Value="12,10" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="Background"
+                                                    Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="BorderBrush"
+                                                    Value="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="BorderThickness"
+                                                    Value="1" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Variant}" Value="system">
+                                            <Setter TargetName="MessageRoleLabel"
+                                                    Property="Visibility"
+                                                    Value="Visible" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="Padding"
+                                                    Value="12,8" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="Background"
+                                                    Value="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="BorderBrush"
+                                                    Value="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}" />
+                                            <Setter TargetName="PlainMessageCard"
+                                                    Property="BorderThickness"
+                                                    Value="1" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <ScrollViewer Grid.Row="2"
+                      Margin="10,0,10,6"
+                      MaxHeight="176"
+                      VerticalScrollBarVisibility="Auto"
+                      Visibility="{Binding ShowInlineStatusRegion, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <Border Margin="0,0,0,10"
+                        Style="{StaticResource SurfaceBorderStyle}"
+                        Visibility="{Binding HasPendingContext, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="已附加上下文" FontSize="12" FontWeight="SemiBold" />
+                            <Button DockPanel.Dock="Right"
+                                    Content="清空"
+                                    Style="{StaticResource GhostActionButtonStyle}"
+                                    Margin="0"
+                                    Click="OnClearPendingContextClick"
+                                    IsEnabled="{Binding CanClearPendingContext}" />
+                        </DockPanel>
+                        <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding PendingContextEntries}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,6,6"
+                                            Padding="8,4"
+                                            CornerRadius="4"
+                                            Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                            BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                            BorderThickness="1">
+                                        <TextBlock Text="{Binding DisplayText}" FontSize="11" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,0,0,10"
+                        Style="{StaticResource SurfaceBorderStyle}"
+                        Visibility="{Binding HasPendingApproval, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="待审批" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,8,0,0" Text="{Binding PendingApprovalSummaryText}" TextWrapping="Wrap" Opacity="0.82" />
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0"
+                                      Style="{StaticResource ComboBoxStyle}"
+                                      ItemsSource="{Binding ApprovalDecisions}"
+                                      SelectedItem="{Binding SelectedApprovalDecision}"
+                                      DisplayMemberPath="DisplayName" />
+                            <TextBox Grid.Column="1"
+                                     Margin="10,0,0,0"
+                                     Style="{StaticResource TextBoxStyle}"
+                                     Text="{Binding ApprovalNoteText, UpdateSourceTrigger=PropertyChanged}" />
+                        </Grid>
+                        <Button Margin="0,12,0,0"
+                                Content="提交审批"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Click="OnSubmitApprovalClick"
+                                IsEnabled="{Binding CanRespondToApproval}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,0,0,10"
+                        Style="{StaticResource SurfaceBorderStyle}"
+                        Visibility="{Binding HasPendingPermission, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="待权限确认" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,8,0,0" Text="{Binding PendingPermissionSummaryText}" TextWrapping="Wrap" Opacity="0.82" />
+                        <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding PendingPermissionFields}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="170" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   VerticalAlignment="Center"
+                                                   Text="{Binding Key}"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1"
+                                                   VerticalAlignment="Center"
+                                                   Text="{Binding ValueTypeDisplay}"
+                                                   Opacity="0.58" />
+                                        <TextBox Grid.Column="2"
+                                                 Style="{StaticResource TextBoxStyle}"
+                                                 Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <DockPanel Margin="0,12,0,0">
+                            <ComboBox DockPanel.Dock="Left"
+                                      Width="180"
+                                      Style="{StaticResource ComboBoxStyle}"
+                                      ItemsSource="{Binding PermissionScopes}"
+                                      SelectedItem="{Binding SelectedPermissionScope}"
+                                      DisplayMemberPath="DisplayName" />
+                            <Button DockPanel.Dock="Right"
+                                    Content="提交权限"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="12,0,0,0"
+                                    Click="OnSubmitPendingPermissionClick"
+                                    IsEnabled="{Binding CanRespondToPermission}" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,0,0,10"
+                        Style="{StaticResource SurfaceBorderStyle}"
+                        Visibility="{Binding HasPendingUserInput, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="待补录信息" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Margin="0,8,0,0" Text="{Binding PendingUserInputSummaryText}" TextWrapping="Wrap" Opacity="0.82" />
+                        <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding PendingUserInputQuestions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,10"
+                                            Padding="12"
+                                            CornerRadius="4"
+                                            Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                            BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                            BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding HeaderText}" FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,6,0,0" Text="{Binding Prompt}" TextWrapping="Wrap" />
+                                            <ItemsControl Margin="0,10,0,0"
+                                                          ItemsSource="{Binding Options}"
+                                                          Visibility="{Binding HasOptions, Converter={StaticResource BoolToVisibility}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,8">
+                                                            <RadioButton GroupName="{Binding GroupName}"
+                                                                         IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                         Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}">
+                                                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                                                            </RadioButton>
+                                                            <TextBlock Margin="20,2,0,0"
+                                                                       Text="{Binding Description}"
+                                                                       TextWrapping="Wrap"
+                                                                       FontSize="11"
+                                                                       Opacity="0.58"
+                                                                       Visibility="{Binding HasDescription, Converter={StaticResource BoolToVisibility}}" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Margin="0,6,0,0"
+                                                       Text="{Binding FreeInputLabel}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Opacity="0.58" />
+                                            <TextBox Margin="0,6,0,0"
+                                                     Style="{StaticResource TextBoxStyle}"
+                                                     Text="{Binding AnswerText, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Margin="0,2,0,0"
+                                Content="提交补录"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Click="OnSubmitPendingUserInputClick"
+                                IsEnabled="{Binding CanSubmitUserInput}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="3"
+                Margin="10,0,10,10"
+                Style="{StaticResource SurfaceBorderStyle}"
+                Visibility="{Binding IsInitialized, Converter={StaticResource BoolToVisibility}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="1"
+                        Margin="0,8,0,0"
+                        Padding="8,6"
+                        CornerRadius="4"
+                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                        BorderThickness="1"
+                        Visibility="{Binding ShowPlanPanel, Converter={StaticResource BoolToVisibility}}">
+                    <Expander Background="Transparent"
+                              BorderThickness="0"
+                              IsExpanded="{Binding IsPlanPanelExpanded, Mode=TwoWay}">
+                        <Expander.Header>
+                            <TextBlock Text="{Binding CurrentPlanSummaryText}"
+                                       FontSize="11.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                       Opacity="0.82" />
+                        </Expander.Header>
+                        <StackPanel Margin="0,6,0,0">
+                            <TextBlock Text="{Binding CurrentPlanExplanation}"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                       Opacity="0.66"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding HasCurrentPlanExplanation, Converter={StaticResource BoolToVisibility}}" />
+                            <ItemsControl Margin="0,8,0,0"
+                                          ItemsSource="{Binding CurrentPlanSteps}"
+                                          Visibility="{Binding HasCurrentPlanSteps, Converter={StaticResource BoolToVisibility}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Grid.Column="0"
+                                                  Width="16"
+                                                  Height="16"
+                                                  Margin="0,1,8,0"
+                                                  VerticalAlignment="Top">
+                                                <Border x:Name="PlanStepPendingDot"
+                                                        Width="12"
+                                                        Height="12"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        CornerRadius="6"
+                                                        Background="#169AA0A6"
+                                                        BorderBrush="#8A9AA0A6"
+                                                        BorderThickness="1"
+                                                        Opacity="0.72" />
+                                                <Path x:Name="PlanStepSpinner"
+                                                      Width="12"
+                                                      Height="12"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      Data="M 6,0.75 A 5.25,5.25 0 1 1 5.99,0.75"
+                                                      Stroke="#D8A640"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      Stretch="Fill"
+                                                      Visibility="Collapsed"
+                                                      RenderTransformOrigin="0.5,0.5">
+                                                    <Path.RenderTransform>
+                                                        <RotateTransform x:Name="PlanStepSpinnerRotate" />
+                                                    </Path.RenderTransform>
+                                                </Path>
+                                                <TextBlock x:Name="PlanStepCompletedGlyph"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Text="✓"
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           Foreground="#4FA36D"
+                                                           Visibility="Collapsed" />
+                                            </Grid>
+                                            <TextBlock x:Name="PlanStepTextBlock"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Top"
+                                                       Text="{Binding DisplayText}"
+                                                       FontSize="12"
+                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                       TextWrapping="Wrap" />
+                                            <Border x:Name="PlanStepStatusBadge"
+                                                    Grid.Column="2"
+                                                    Margin="8,0,0,0"
+                                                    Padding="6,1"
+                                                    VerticalAlignment="Top"
+                                                    CornerRadius="4"
+                                                    Background="#169AA0A6"
+                                                    BorderBrush="#8A9AA0A6"
+                                                    BorderThickness="1"
+                                                    Opacity="0.84">
+                                                <TextBlock x:Name="PlanStepStatusTextBlock"
+                                                           Text="{Binding StatusText}"
+                                                           FontSize="10.5"
+                                                           Foreground="#C4CDD3"
+                                                           Opacity="0.62" />
+                                            </Border>
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                                <Setter TargetName="PlanStepPendingDot" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="PlanStepSpinner" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="PlanStepCompletedGlyph" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="PlanStepTextBlock" Property="TextDecorations" Value="Strikethrough" />
+                                                <Setter TargetName="PlanStepTextBlock" Property="Opacity" Value="0.62" />
+                                                <Setter TargetName="PlanStepStatusBadge" Property="Opacity" Value="0.58" />
+                                                <Setter TargetName="PlanStepStatusBadge" Property="Background" Value="#184FA36D" />
+                                                <Setter TargetName="PlanStepStatusBadge" Property="BorderBrush" Value="#4FA36D" />
+                                                <Setter TargetName="PlanStepStatusTextBlock" Property="Foreground" Value="#4FA36D" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsInProgress}" Value="True">
+                                                <Setter TargetName="PlanStepPendingDot" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="PlanStepSpinner" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="PlanStepCompletedGlyph" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="PlanStepStatusBadge" Property="BorderBrush" Value="#D8A640" />
+                                                <Setter TargetName="PlanStepStatusBadge" Property="Background" Value="#1FD8A640" />
+                                                <Setter TargetName="PlanStepStatusTextBlock" Property="Foreground" Value="#D8A640" />
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard x:Name="PlanStepSpinnerStoryboard">
+                                                        <Storyboard RepeatBehavior="Forever">
+                                                            <DoubleAnimation Storyboard.TargetName="PlanStepSpinnerRotate"
+                                                                             Storyboard.TargetProperty="Angle"
+                                                                             From="0"
+                                                                             To="360"
+                                                                             Duration="0:0:0.9" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="PlanStepSpinnerStoryboard" />
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Expander>
+                </Border>
+
+                <Border Grid.Row="2"
+                        Margin="0,8,0,0"
+                        Padding="8,6"
+                        CornerRadius="4"
+                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                        BorderThickness="1"
+                        Visibility="{Binding ShowCollaborationPanel, Converter={StaticResource BoolToVisibility}}">
+                    <Expander Background="Transparent"
+                              BorderThickness="0"
+                              IsExpanded="{Binding IsCollaborationPanelExpanded, Mode=TwoWay}">
+                        <Expander.Header>
+                            <TextBlock Text="{Binding CollaborationSummaryText}"
+                                       FontSize="11.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                       Opacity="0.82" />
+                        </Expander.Header>
+                        <ItemsControl Margin="0,6,0,0"
+                                      ItemsSource="{Binding CollaborationThreads}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid Grid.Column="0"
+                                              Width="16"
+                                              Height="16"
+                                              Margin="0,1,8,0"
+                                              VerticalAlignment="Top">
+                                            <Border x:Name="CollaborationPendingDot"
+                                                    Width="12"
+                                                    Height="12"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    CornerRadius="6"
+                                                    Background="#169AA0A6"
+                                                    BorderBrush="#8A9AA0A6"
+                                                    BorderThickness="1"
+                                                    Opacity="0.72" />
+                                            <TextBlock x:Name="CollaborationPrimaryGlyph"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Text="主"
+                                                       FontSize="10"
+                                                       FontWeight="Bold"
+                                                       Foreground="#4D9FD6"
+                                                       Visibility="Collapsed" />
+                                        </Grid>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock x:Name="CollaborationTitleTextBlock"
+                                                       VerticalAlignment="Top"
+                                                       Text="{Binding TitleText}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock x:Name="CollaborationMetaTextBlock"
+                                                       Margin="0,2,0,0"
+                                                       Text="{Binding MetaText}"
+                                                       FontSize="10.5"
+                                                       Foreground="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                                       Opacity="0.58"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Border x:Name="CollaborationStatusBadge"
+                                                Grid.Column="2"
+                                                Margin="8,0,0,0"
+                                                Padding="6,1"
+                                                VerticalAlignment="Top"
+                                                CornerRadius="4"
+                                                Background="#169AA0A6"
+                                                BorderBrush="#8A9AA0A6"
+                                                BorderThickness="1"
+                                                Opacity="0.84">
+                                            <TextBlock x:Name="CollaborationStatusTextBlock"
+                                                       Text="{Binding StatusText}"
+                                                       FontSize="10.5"
+                                                       Foreground="#C4CDD3"
+                                                       Opacity="0.72" />
+                                        </Border>
+                                        <Button Grid.Column="3"
+                                                Margin="8,0,0,0"
+                                                Content="{Binding JumpButtonText}"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                VerticalAlignment="Top"
+                                                Click="OnJumpCollaborationThreadClick"
+                                                IsEnabled="{Binding CanJump}" />
+                                    </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsPrimaryThread}" Value="True">
+                                            <Setter TargetName="CollaborationPendingDot" Property="Visibility" Value="Collapsed" />
+                                            <Setter TargetName="CollaborationPrimaryGlyph" Property="Visibility" Value="Visible" />
+                                            <Setter TargetName="CollaborationStatusBadge" Property="Background" Value="#184D9FD6" />
+                                            <Setter TargetName="CollaborationStatusBadge" Property="BorderBrush" Value="#4D9FD6" />
+                                            <Setter TargetName="CollaborationStatusTextBlock" Property="Foreground" Value="#4D9FD6" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCurrentThread}" Value="True">
+                                            <Setter TargetName="CollaborationPendingDot" Property="Background" Value="#1FD8A640" />
+                                            <Setter TargetName="CollaborationPendingDot" Property="BorderBrush" Value="#D8A640" />
+                                            <Setter TargetName="CollaborationStatusBadge" Property="Background" Value="#1FD8A640" />
+                                            <Setter TargetName="CollaborationStatusBadge" Property="BorderBrush" Value="#D8A640" />
+                                            <Setter TargetName="CollaborationStatusTextBlock" Property="Foreground" Value="#D8A640" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsArchived}" Value="True">
+                                            <Setter TargetName="CollaborationTitleTextBlock" Property="Opacity" Value="0.62" />
+                                            <Setter TargetName="CollaborationMetaTextBlock" Property="Opacity" Value="0.42" />
+                                            <Setter TargetName="CollaborationStatusBadge" Property="Opacity" Value="0.58" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                </Border>
+
+                <Border Grid.Row="3"
+                        Margin="0,8,0,0"
+                        Padding="8,6"
+                        CornerRadius="4"
+                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                        BorderThickness="1"
+                        Visibility="{Binding HasPendingFollowUps, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding PendingFollowUpSummary}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Opacity="0.82" />
+                        <ItemsControl Margin="0,8,0,0"
+                                      ItemsSource="{Binding PendingFollowUpEntries}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,6"
+                                            Padding="8,6"
+                                            CornerRadius="4"
+                                            Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                            BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                            BorderThickness="1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <WrapPanel>
+                                                    <Border Padding="6,1"
+                                                            CornerRadius="4"
+                                                            Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                                                            BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                                            BorderThickness="1">
+                                                        <TextBlock Text="{Binding ModeText}"
+                                                                   FontSize="10.5"
+                                                                   FontWeight="SemiBold"
+                                                                   Opacity="0.78" />
+                                                    </Border>
+                                                    <TextBlock Margin="8,2,0,0"
+                                                               Text="{Binding ContextSummary}"
+                                                               FontSize="10.5"
+                                                               Opacity="0.62" />
+                                                </WrapPanel>
+                                                <TextBlock Margin="0,6,0,0"
+                                                           Text="{Binding Message}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1"
+                                                        Margin="12,0,0,0"
+                                                        Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <Button Style="{StaticResource HeaderButtonStyle}"
+                                                        Click="OnPromotePendingFollowUpClick"
+                                                        Content="{Binding PromoteActionText}"
+                                                        IsEnabled="{Binding CanPromoteToSteer}" />
+                                                <Button Content="删除"
+                                                        Style="{StaticResource HeaderButtonStyle}"
+                                                        Margin="8,0,0,0"
+                                                        Click="OnDeletePendingFollowUpClick"
+                                                        IsEnabled="{Binding CanDelete}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="4"
+                        Margin="0,8,0,0"
+                        Padding="8"
+                        CornerRadius="4"
+                        Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                        BorderThickness="1">
+                    <TextBox x:Name="InputTextBox"
+                             Style="{StaticResource InlineInputStyle}"
+                             MinHeight="72"
+                             MaxHeight="220"
+                             Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
+                             PreviewKeyDown="OnInputPreviewKeyDown" />
+                </Border>
+
+                <Grid Grid.Row="5" Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <WrapPanel>
+                            <Button Content="当前文件"
+                                    Style="{StaticResource ChipButtonStyle}"
+                                    Click="OnAddCurrentFileContextClick"
+                                    IsEnabled="{Binding CanAddCurrentFileContext}" />
+                            <Button Content="当前选区"
+                                    Style="{StaticResource ChipButtonStyle}"
+                                    Click="OnAddSelectionContextClick"
+                                    IsEnabled="{Binding CanAddSelectionContext}" />
+                            <Button Content="指定文件"
+                                    Style="{StaticResource ChipButtonStyle}"
+                                    Click="OnAddSpecifiedFileContextClick"
+                                    IsEnabled="{Binding CanAddSpecifiedFileContext}" />
+                        </WrapPanel>
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="{Binding ComposerMetaText}"
+                                   FontSize="11"
+                                   Opacity="0.58"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Bottom"
+                                HorizontalAlignment="Right">
+                        <CheckBox x:Name="PlanModeToggleCheckBox"
+                                  Margin="0,0,12,0"
+                                  VerticalAlignment="Center"
+                                  Content="Plan 模式"
+                                  IsChecked="{Binding IsPlanModeEnabled, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanFillActionPayload}"
+                                  ToolTip="切换后需点击“重新初始化”生效。" />
+                        <Button Content="中断"
+                                Style="{StaticResource HeaderButtonStyle}"
+                                Margin="0"
+                                Click="OnInterruptClick"
+                                IsEnabled="{Binding CanInterrupt}" />
+                        <Button Content="{Binding SendButtonText}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Margin="10,0,0,0"
+                                Click="OnSendClick"
+                                IsEnabled="{Binding CanSend}" />
+                        <Button Content="▾"
+                                Style="{StaticResource SendOptionButtonStyle}"
+                                Click="OnOpenSendOptionsMenuClick">
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="Top"
+                                             StaysOpen="False"
+                                             DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="Enter 发送"
+                                              Tag="enter"
+                                              IsCheckable="True"
+                                              IsChecked="{Binding EnterSends, Mode=OneWay}"
+                                              Click="OnEnterBehaviorMenuItemClick" />
+                                    <MenuItem Header="Ctrl+Enter 发送"
+                                              Tag="ctrl-enter"
+                                              IsCheckable="True"
+                                              IsChecked="{Binding CtrlEnterSends, Mode=OneWay}"
+                                              Click="OnEnterBehaviorMenuItemClick" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.RowSpan="5"
+              Panel.ZIndex="20"
+              Visibility="{Binding IsInspectorOpen, Converter={StaticResource BoolToVisibility}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="440" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="#33000000" />
+
+            <Border Grid.Column="1"
+                    Margin="0"
+                    Padding="12"
+                    Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                    BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                    BorderThickness="1,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   VerticalAlignment="Center"
+                                   Text="详细设置"
+                                   FontSize="15"
+                                   FontWeight="SemiBold" />
+                        <Button Grid.Column="1"
+                                Content="✕"
+                                ToolTip="关闭"
+                                Style="{StaticResource InspectorCloseButtonStyle}"
+                                Click="OnCloseInspectorClick" />
+                    </Grid>
+
+                    <ScrollViewer x:Name="InspectorScrollViewer"
+                                  Grid.Row="1"
+                                  VerticalScrollBarVisibility="Hidden"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  CanContentScroll="False"
+                                  Focusable="True"
+                                  PanningMode="VerticalOnly"
+                                  PreviewMouseWheel="OnInspectorContentPreviewMouseWheel">
+                        <StackPanel>
+                            <Expander x:Name="InspectorConversationSection"
+                                      Style="{StaticResource InspectorExpanderStyle}">
+                                <Expander.Header>
+                                    <TextBlock Text="历史会话列表"
+                                               Style="{StaticResource InspectorPrimaryTitleTextStyle}" />
+                                </Expander.Header>
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="这里保留完整线程管理。可按筛选范围恢复、归档、删除，或直接清空当前列表。"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <CheckBox Content="包含归档"
+                                                  IsChecked="{Binding IncludeArchivedThreads}"
+                                                  Checked="OnThreadListFilterChanged"
+                                                  Unchecked="OnThreadListFilterChanged"
+                                                  VerticalContentAlignment="Center" />
+                                        <CheckBox Margin="16,0,0,0"
+                                                  Content="仅当前目录"
+                                                  IsChecked="{Binding MatchCurrentWorkingDirectory}"
+                                                  Checked="OnThreadListFilterChanged"
+                                                  Unchecked="OnThreadListFilterChanged"
+                                                  VerticalContentAlignment="Center" />
+                                        <Button Margin="140,0,0,0"
+                                                Content="刷新"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnRefreshThreadsClick"
+                                                IsEnabled="{Binding CanRefreshThreads}" />
+                                        <Button Margin="10,0,0,0"
+                                                Content="清空"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnClearAllThreadsClick"
+                                                IsEnabled="{Binding CanClearAllThreads}" />
+                                    </WrapPanel>
+
+                                    <ListBox Margin="0,12,0,0"
+                                             MinHeight="220"
+                                             Style="{StaticResource ListBoxStyle}"
+                                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                             ItemsSource="{Binding RecentThreads}"
+                                             SelectedItem="{Binding SelectedThread}"
+                                             ItemTemplate="{StaticResource ThreadListItemTemplate}" />
+
+                                    <TextBlock Margin="0,18,0,0"
+                                               Text="当前目标会话"
+                                               Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding ThreadOperationTargetText}"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander x:Name="InspectorActivitySection"
+                                      Style="{StaticResource InspectorExpanderStyle}">
+                                <Expander.Header>
+                                    <TextBlock Text="当前会话"
+                                               Style="{StaticResource InspectorPrimaryTitleTextStyle}" />
+                                </Expander.Header>
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="这里提供当前选中会话对应的线程文件入口，减少状态信息干扰。"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+
+                                    <TextBlock Margin="0,16,0,0"
+                                               Text="目标会话"
+                                               Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding ThreadOperationTargetText}"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button Content="打开线程文件"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnOpenThreadFileClick"
+                                                IsEnabled="{Binding CanOpenDisplayedThreadFile}" />
+                                        <Button Content="打开会话目录"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnOpenThreadSessionsDirectoryClick"
+                                                IsEnabled="{Binding CanOpenThreadSessionsDirectory}" />
+                                        <Button Content="打开运行时日志"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnOpenRuntimeEventLogClick"
+                                                IsEnabled="{Binding CanOpenRuntimeEventLogFile}" />
+                                        <Button Content="清空运行时日志"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnClearSidecarEventsClick"
+                                                IsEnabled="{Binding CanClearSidecarEvents}" />
+                                    </WrapPanel>
+
+                                    <TextBlock Margin="0,18,0,0"
+                                               Text="线程文件路径"
+                                               Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding DisplayedThreadFilePathText}"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+
+                                    <TextBlock Margin="0,18,0,0"
+                                               Text="运行时日志路径"
+                                               Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="{Binding RuntimeEventLogPathText}"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander x:Name="InspectorSettingsSection"
+                                      Style="{StaticResource InspectorExpanderStyle}">
+                                <Expander.Header>
+                                    <TextBlock Text="启动参数"
+                                               Style="{StaticResource InspectorPrimaryTitleTextStyle}" />
+                                </Expander.Header>
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="工作目录"
+                                               Style="{StaticResource InspectorHelperTextStyle}" />
+                                <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0"
+                                                 Style="{StaticResource TextBoxStyle}"
+                                                 Text="{Binding WorkingDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="10,0,0,0"
+                                                Content="..."
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnBrowseWorkingDirectoryClick"
+                                                IsEnabled="{Binding CanBrowseBootstrapInputs}" />
+                                </Grid>
+
+                                <TextBlock Margin="0,12,0,0"
+                                           Text="配置文件（tianshu.toml）"
+                                           Style="{StaticResource InspectorHelperTextStyle}" />
+                                <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0"
+                                                 Style="{StaticResource TextBoxStyle}"
+                                                 Text="{Binding ConfigPath, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="10,0,0,0"
+                                                Content="..."
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnBrowseConfigPathClick"
+                                                IsEnabled="{Binding CanBrowseBootstrapInputs}" />
+                                </Grid>
+
+                                <TextBlock Margin="0,12,0,0"
+                                           Text="内核项目文件"
+                                           Style="{StaticResource InspectorHelperTextStyle}" />
+                                <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0"
+                                                 Style="{StaticResource TextBoxStyle}"
+                                                 Text="{Binding AppHostProjectPath, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="10,0,0,0"
+                                                Content="..."
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnBrowseAppHostProjectPathClick"
+                                                IsEnabled="{Binding CanBrowseBootstrapInputs}" />
+                                </Grid>
+
+                                <TextBlock Margin="0,12,0,0"
+                                           Text="配置档"
+                                           Style="{StaticResource InspectorHelperTextStyle}" />
+                                <TextBox Margin="0,6,0,0"
+                                         Style="{StaticResource TextBoxStyle}"
+                                         Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Margin="0,12,0,0"
+                                           Text="协作模式（可选）"
+                                           Style="{StaticResource InspectorHelperTextStyle}" />
+                                <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0"
+                                                 Style="{StaticResource TextBoxStyle}"
+                                                 Text="{Binding OverrideCollaborationMode, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1"
+                                                Margin="10,0,0,0"
+                                                Content="读取协作模式"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnListCollaborationModesClick"
+                                                IsEnabled="{Binding CanExecuteSettingsAction}" />
+                                </Grid>
+                                <TextBlock Margin="0,4,0,0"
+                                           Text="留空或填写 default 为默认模式；填写 plan 为计划模式。计划模式更容易显式生成计划并调度子代理。修改后需点击“重新初始化”生效。"
+                                           Style="{StaticResource InspectorHelperTextStyle}"
+                                           TextWrapping="Wrap" />
+
+                                <WrapPanel Margin="0,14,0,0">
+                                        <Button Content="重新初始化"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Click="OnReconnectClick"
+                                                IsEnabled="{Binding CanReconnect}" />
+                                        <Button Content="恢复默认"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnResetBootstrapDefaultsClick" />
+                                        <Button Content="刷新配置"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnReadConfigClick"
+                                                ToolTip="按照上方的所选内容重新刷新 tianshu.toml"
+                                                IsEnabled="{Binding CanExecuteSettingsAction}" />
+                                        <Button Content="刷新依赖"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnReadConfigRequirementsClick"
+                                                ToolTip="读取当前目录下：requirements.toml 这种“约束/要求”文件，内容像允许哪些 approval_policy、哪些 sandbox_mode、哪些 web_search 模式、一些 feature/network 限制等。如果没有这个文件，返回就是空"
+                                                IsEnabled="{Binding CanExecuteSettingsAction}" />
+                                        <Button Content="刷新模型列表"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="OnListModelsClick"
+                                                IsEnabled="{Binding CanExecuteSettingsAction}" />
+                                </WrapPanel>
+
+                                <Border Margin="0,18,0,12"
+                                        Style="{StaticResource InspectorDividerStyle}" />
+                                <TextBlock Text="当前生效配置"
+                                           Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Text="{Binding EffectiveConfigStatusText}"
+                                           FontSize="11.5"
+                                           Opacity="0.78"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Text="{Binding SettingsConfigScopeText}"
+                                           Style="{StaticResource InspectorHelperTextStyle}" />
+                                <ItemsControl Margin="0,12,0,0"
+                                              ItemsSource="{Binding SettingsConfigFields}"
+                                              Visibility="{Binding HasSettingsConfigFields, Converter={StaticResource BoolToVisibility}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,8"
+                                                    Padding="10"
+                                                    Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                                    BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="132" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0">
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                                                        <TextBlock Margin="0,3,0,0"
+                                                                   Text="{Binding KeyPath}"
+                                                                   FontSize="10"
+                                                                   Opacity="0.48" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1">
+                                                        <TextBlock Text="{Binding Value}"
+                                                                   FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Margin="0,4,0,0"
+                                                                   Text="{Binding Source}"
+                                                                   FontSize="10.5"
+                                                                   Opacity="0.56"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Border Margin="0,18,0,12"
+                                        Style="{StaticResource InspectorDividerStyle}" />
+                                <TextBlock Text="可用模型目录"
+                                           Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Text="{Binding ModelCatalogStatusText}"
+                                           FontSize="11.5"
+                                           Opacity="0.78"
+                                           TextWrapping="Wrap" />
+                                <ItemsControl Margin="0,12,0,0"
+                                              ItemsSource="{Binding SettingsModelCatalog}"
+                                              Visibility="{Binding HasSettingsModelCatalog, Converter={StaticResource BoolToVisibility}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,10"
+                                                    Padding="12"
+                                                    Background="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                                                    BorderBrush="{DynamicResource {x:Static platformui:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4">
+                                                <StackPanel>
+                                                    <WrapPanel>
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   FontSize="12.5"
+                                                                   FontWeight="SemiBold" />
+                                                        <Border Margin="8,0,0,0"
+                                                                Padding="6,1"
+                                                                CornerRadius="4"
+                                                                Background="{DynamicResource {x:Static platformui:EnvironmentColors.FileTabSelectedBackgroundBrushKey}}"
+                                                                Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="当前配置" FontSize="10.5" FontWeight="SemiBold" />
+                                                        </Border>
+                                                        <Border Margin="8,0,0,0"
+                                                                Padding="6,1"
+                                                                CornerRadius="4"
+                                                                Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}">
+                                                            <TextBlock Text="{Binding DefaultReasoningEffort}" FontSize="10.5" />
+                                                        </Border>
+                                                    </WrapPanel>
+                                                    <TextBlock Margin="0,4,0,0"
+                                                               Text="{Binding ModelId}"
+                                                               FontSize="10.5"
+                                                               Opacity="0.52"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Margin="0,8,0,0"
+                                                               Text="{Binding Description}"
+                                                               FontSize="11"
+                                                               Opacity="0.82"
+                                                               TextWrapping="Wrap" />
+                                                    <WrapPanel Margin="0,8,0,0">
+                                                        <Border Padding="6,2"
+                                                                Margin="0,0,8,6"
+                                                                CornerRadius="4"
+                                                                Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}">
+                                                            <TextBlock Text="{Binding SupportedReasoningEffortsText}" FontSize="10.5" />
+                                                        </Border>
+                                                        <Border Padding="6,2"
+                                                                Margin="0,0,8,6"
+                                                                CornerRadius="4"
+                                                                Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}">
+                                                            <TextBlock Text="{Binding InputModalitiesText}" FontSize="10.5" />
+                                                        </Border>
+                                                        <Border Padding="6,2"
+                                                                Margin="0,0,8,6"
+                                                                CornerRadius="4"
+                                                                Background="{DynamicResource {x:Static platformui:EnvironmentColors.CommandBarMenuBackgroundGradientBrushKey}}"
+                                                                Visibility="{Binding SupportsPersonality, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="支持个性化" FontSize="10.5" />
+                                                        </Border>
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel Margin="0,18,0,0"
+                                            Visibility="{Binding HasSettingsResult, Converter={StaticResource BoolToVisibility}}">
+                                    <Border Margin="0,0,0,12"
+                                            Style="{StaticResource InspectorDividerStyle}" />
+                                    <TextBlock Text="设置结果"
+                                               Style="{StaticResource InspectorSectionTitleTextStyle}" />
+                                    <TextBox Margin="0,6,0,0"
+                                             Style="{StaticResource TextBoxStyle}"
+                                             Text="{Binding SettingsResultText, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Disabled"
+                                             MinHeight="140" />
+                                </StackPanel>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,49 @@
+{
+  "graphId": "graph-c0-001",
+  "version": "1",
+  "intentKind": "Turn",
+  "entryStageId": "stage-1",
+  "stages": [
+    {
+      "stageId": "stage-1",
+      "kind": "model.invoke.initial",
+      "objective": "invoke the initial model step",
+      "capabilityToolIds": [ "model.invoke.initial" ],
+      "sideEffectLevel": "None",
+      "budget": {
+        "tokenBudget": 1000,
+        "timeBudgetMs": 30000,
+        "toolCallBudget": 0
+      }
+    },
+    {
+      "stageId": "stage-2",
+      "kind": "diagnostics.emit_trace",
+      "objective": "emit the diagnostic trace",
+      "capabilityToolIds": [ "diagnostics.emit_trace" ],
+      "sideEffectLevel": "None",
+      "budget": {
+        "tokenBudget": 500,
+        "timeBudgetMs": 10000,
+        "toolCallBudget": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "fromStageId": "stage-1",
+      "toStageId": "stage-2",
+      "transitionKind": "Success"
+    }
+  ],
+  "policies": {
+    "allowedCapabilityToolIds": [ "model.invoke.initial", "diagnostics.emit_trace" ],
+    "maxSideEffectLevel": "None",
+    "requiresHumanGate": false
+  },
+  "budgets": {
+    "tokenBudget": 1500,
+    "timeBudgetMs": 40000,
+    "toolCallBudget": 0
+  }
+}

@@ -1,0 +1,20 @@
+id = "builtin"
+display_name = "TianShu Builtin Workspace Resolver"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[resolvers]]
+id = "default"
+display_name = "Default Project Resolver"
+enabled = true
+type = "builtin"
+priority = 0
+root_markers = [".git", ".tianshu", "TianShu.sln"]
+profile = "default"
+trust_policy = "prompt"
+artifact_root = ".tianshu/artifacts"
+state_root = ".tianshu/state"
+ignore_globs = ["bin/**", "obj/**", ".git/**"]
+language_markers = ["*.sln", "*.csproj", "package.json", "pyproject.toml", "Cargo.toml"]
+framework_markers = ["*.sln", "Directory.Build.props", "package.json"]

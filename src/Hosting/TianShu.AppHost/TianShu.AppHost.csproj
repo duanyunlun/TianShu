@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.AppHost.Tests" />
+    <InternalsVisibleTo Include="TianShu.Provider.OpenAI.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Runtime.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TianShu.AppHost.Catalog\TianShu.AppHost.Catalog.csproj" />
+    <ProjectReference Include="..\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
+    <ProjectReference Include="..\TianShu.AppHost.State\TianShu.AppHost.State.csproj" />
+    <ProjectReference Include="..\TianShu.AppHost.Tools\TianShu.AppHost.Tools.csproj" />
+    <ProjectReference Include="..\TianShu.AppHost.Tools.Runtime\TianShu.AppHost.Tools.Runtime.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.Configuration\TianShu.Configuration.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.ControlPlane\TianShu.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.Diagnostics\TianShu.Diagnostics.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.IdentityMemory\TianShu.IdentityMemory.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.RuntimeComposition\TianShu.RuntimeComposition.csproj" />
+    <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Anthropic\TianShu.Provider.Anthropic.csproj" ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Google\TianShu.Provider.Google.csproj" ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAICompatible\TianShu.Provider.OpenAICompatible.csproj" ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" ExcludeAssets="compile" />
+  </ItemGroup>
+</Project>

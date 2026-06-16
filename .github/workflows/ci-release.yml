@@ -1,0 +1,93 @@
+name: CI and Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-test:
+    name: Build and P0 tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore CLI test graph
+        run: dotnet restore tests/TianShu.Cli.Tests/TianShu.Cli.Tests.csproj
+
+      - name: Build CLI
+        run: dotnet build src/Presentations/TianShu.Cli/TianShu.Cli.csproj --configuration Release --no-restore --nologo --verbosity:minimal
+
+      - name: Test CLI first-run bootstrap
+        run: dotnet test tests/TianShu.Cli.Tests/TianShu.Cli.Tests.csproj --configuration Release --nologo --logger "console;verbosity=minimal" --filter "FullyQualifiedName~CliFirstRunBootstrapTests" -m:1
+
+      - name: Test configuration public schema guard
+        run: dotnet test tests/TianShu.Configuration.Tests/TianShu.Configuration.Tests.csproj --configuration Release --nologo --logger "console;verbosity=minimal" --filter "FullyQualifiedName~ConfigSchemaDocs_DoNotReintroduceRemovedLegacyRootFieldsAsFormalInputs" -m:1
+
+      - name: Test installer preservation guard
+        run: dotnet test tests/TianShu.Execution.Integration.Tests/TianShu.Execution.Integration.Tests.csproj --configuration Release --nologo --logger "console;verbosity=minimal" --filter "FullyQualifiedName~InstallScriptConfigurationPreservationTests" -m:1
+
+  package-cli:
+    name: Package CLI
+    runs-on: windows-latest
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Package directory-style CLI archives
+        shell: pwsh
+        run: ./tools/Publish-TianShuCliRelease.ps1 -Configuration Release -Version "${{ github.ref_name }}"
+
+      - name: Upload release packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tianshu-cli-release-packages
+          path: artifacts/release/packages/*
+          if-no-files-found: error
+
+  github-release:
+    name: Publish GitHub Release
+    runs-on: windows-latest
+    needs: package-cli
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          name: tianshu-cli-release-packages
+          path: artifacts/release/packages
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/release/packages/*
+          generate_release_notes: true

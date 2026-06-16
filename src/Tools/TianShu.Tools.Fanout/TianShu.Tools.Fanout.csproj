@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TianShu.Tools.Fanout</AssemblyName>
+    <RootNamespace>TianShu.Tools.Fanout</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Primitives\TianShu.Contracts.Primitives.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Tools\TianShu.Contracts.Tools.csproj" />
+  </ItemGroup>
+</Project>

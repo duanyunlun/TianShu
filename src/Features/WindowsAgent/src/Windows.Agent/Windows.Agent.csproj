@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RollForward>Major</RollForward>
+    <RootNamespace>Windows.Agent</RootNamespace>
+    <AssemblyName>Windows.Agent</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- 确保native库正确复制和加载 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishSingleFile>false</PublishSingleFile>
+
+    <!-- Windows.Agent 作为能力库（Services + Tools），对外入口由 Windows.Agent.Cli 提供 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FlaUI.Core" />
+    <PackageReference Include="FlaUI.UIA2" />
+    <PackageReference Include="FlaUI.UIA3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="HtmlAgilityPack" />
+    <PackageReference Include="ReverseMarkdown" />
+    <PackageReference Include="System.Drawing.Common" />
+
+    <!-- OpenCV相关包，明确指定平台 -->
+    <PackageReference Include="OpenCvSharp4" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" />
+
+    <!-- OpenVINO相关包 -->
+    <PackageReference Include="Sdcb.OpenVINO" />
+    <PackageReference Include="Sdcb.OpenVINO.PaddleOCR.Models.Online" />
+    <PackageReference Include="Sdcb.OpenVINO.PaddleOCR" />
+    <PackageReference Include="Sdcb.OpenVINO.runtime.win-x64" />
+
+    <PackageReference Include="Microsoft.Windows.CsWin32" />
+    <PackageReference Include="System.Management" />
+    <PackageReference Include="NAudio" />
+    <PackageReference Include="YamlDotNet" VersionOverride="13.1.1" />
+  </ItemGroup>
+
+
+</Project>

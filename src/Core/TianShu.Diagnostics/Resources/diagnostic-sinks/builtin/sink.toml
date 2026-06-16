@@ -1,0 +1,34 @@
+id = "builtin"
+display_name = "TianShu Builtin Diagnostics"
+enabled = true
+type = "builtin"
+priority = 0
+
+[[sinks]]
+id = "turn-log"
+display_name = "Turn Log Diagnostics"
+enabled = true
+type = "turn-log"
+level = "stats"
+modules = ["provider", "context", "tool", "memory", "governance", "runtime", "presentation"]
+priority = 0
+
+[[sinks]]
+id = "provider-request-artifacts"
+display_name = "Provider Request Payload Artifacts"
+enabled = true
+type = "artifact-file"
+target = "./artifacts/provider-requests"
+level = "artifact"
+modules = ["provider"]
+max_bytes = 1048576
+priority = 10
+
+[[sinks]]
+id = "telemetry"
+display_name = "External Telemetry"
+enabled = false
+type = "telemetry"
+endpoint = ""
+level = "summary"
+priority = 100

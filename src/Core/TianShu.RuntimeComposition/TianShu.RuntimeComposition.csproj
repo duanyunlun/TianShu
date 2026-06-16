@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.AppHost" />
+    <InternalsVisibleTo Include="TianShu.AppHost.Tests" />
+    <InternalsVisibleTo Include="TianShu.Cli" />
+    <InternalsVisibleTo Include="TianShu.VSSDK.Sidecar" />
+    <InternalsVisibleTo Include="TianShu.Cli.Tests" />
+    <InternalsVisibleTo Include="TianShu.Execution.Runtime.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="TianShu.Execution.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Hosting\TianShu.AppHost.Tools.Runtime\TianShu.AppHost.Tools.Runtime.csproj" />
+    <ProjectReference Include="..\..\Hosting\TianShu.AppHost.State\TianShu.AppHost.State.csproj" />
+    <ProjectReference Include="..\TianShu.Configuration\TianShu.Configuration.csproj" />
+    <ProjectReference Include="..\TianShu.ControlPlane\TianShu.ControlPlane.csproj" />
+    <ProjectReference Include="..\TianShu.Diagnostics\TianShu.Diagnostics.csproj" />
+    <ProjectReference Include="..\TianShu.Kernel\TianShu.Kernel.csproj" />
+    <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Catalog\TianShu.Contracts.Catalog.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Agents\TianShu.Contracts.Agents.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Diagnostics\TianShu.Contracts.Diagnostics.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Environment\TianShu.Contracts.Environment.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Interactions\TianShu.Contracts.Interactions.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Kernel\TianShu.Contracts.Kernel.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Modules\TianShu.Contracts.Modules.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Orchestration\TianShu.Contracts.Orchestration.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Sessions\TianShu.Contracts.Sessions.csproj" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Tools\TianShu.Tools.FileSystem\TianShu.Tools.FileSystem.csproj" />
+    <ProjectReference Include="..\..\Tools\TianShu.Tools.FileSystemMutating\TianShu.Tools.FileSystemMutating.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Agents\TianShu.Contracts.Agents.csproj" />
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Execution\TianShu.Contracts.Execution.csproj" />
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Kernel\TianShu.Contracts.Kernel.csproj" />
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Primitives\TianShu.Contracts.Primitives.csproj" />
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Provider\TianShu.Contracts.Provider.csproj" />
+    <ProjectReference Include="..\..\..\src\Contracts\TianShu.Contracts.Tools\TianShu.Contracts.Tools.csproj" />
+    <ProjectReference Include="..\..\..\src\Core\TianShu.Kernel\TianShu.Kernel.csproj" />
+    <ProjectReference Include="..\..\..\src\Core\TianShu.RuntimeComposition\TianShu.RuntimeComposition.csproj" />
+    <ProjectReference Include="..\..\..\src\Core\TianShu.SubAgent\TianShu.SubAgent.csproj" />
+    <ProjectReference Include="..\..\..\src\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\..\src\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" />
+  </ItemGroup>
+
+</Project>

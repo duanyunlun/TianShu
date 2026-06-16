@@ -1,0 +1,15 @@
+root = true
+
+[*]
+insert_final_newline = true
+
+[.editorconfig]
+end_of_line = crlf
+
+[.gitattributes]
+end_of_line = crlf
+
+[*.{sln,csproj,props,targets,xaml,resx}]
+# 仅对 VS/MSBuild 关键文件固定为 CRLF，避免编辑器弹出行尾修正提示
+end_of_line = crlf
+

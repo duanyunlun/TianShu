@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>TianShu.VSSDK.Sidecar</AssemblyName>
+    <RootNamespace>TianShu.VSSDK.Sidecar</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="TianShu.Contracts.Primitives" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TianShu.VSSDK.Sidecar.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="StdioProtocolModels.cs" />
+    <Compile Include="StdioApprovalTypes.cs" />
+    <Compile Include="StdioInteractiveStateTypes.cs" />
+    <Compile Include="StdioThreadOptionTypes.cs" />
+    <Compile Include="StdioSidecarHost.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\TianShu.ControlPlane\TianShu.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.RuntimeComposition\TianShu.RuntimeComposition.csproj" />
+    <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
+    <ProjectReference Include="..\..\Core\TianShu.HostGateway\TianShu.HostGateway.csproj" />
+    <ProjectReference Include="..\..\Hosting\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
+    <ProjectReference Include="..\..\Analyzers\TianShu.ArchitectureAnalyzers\TianShu.ArchitectureAnalyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAICompatible\TianShu.Provider.OpenAICompatible.csproj" ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Provider\TianShu.Provider.OpenAI\TianShu.Provider.OpenAI.csproj" ExcludeAssets="compile" />
+  </ItemGroup>
+</Project>

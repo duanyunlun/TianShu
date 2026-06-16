@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Commands package="guidTianShuVssdkPackage">
+    <Buttons>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidShowTianShuConversation" priority="0x0100" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 对话</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuNewSession" priority="0x0101" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 新建会话</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuAddCurrentFile" priority="0x0102" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 加入当前文件</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuAddSelection" priority="0x0103" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 加入当前选区</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuAddSpecifiedFile" priority="0x0104" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 加入指定文件</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuReconnectRuntime" priority="0x0105" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 重连运行时</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidTianShuVssdkCmdSet" id="cmdidTianShuSettings" priority="0x0106" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_EXTENSIONS" />
+        <Strings>
+          <ButtonText>TianShu 常用设置</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+  <Symbols>
+    <GuidSymbol name="guidSHLMainMenu" value="{D309F791-903F-11D0-9EFC-00A0C911004F}">
+      <IDSymbol name="IDM_VS_MENU_EXTENSIONS" value="0x0091" />
+      <IDSymbol name="IDG_VS_EXTENSIONS" value="0x6000" />
+    </GuidSymbol>
+    <GuidSymbol name="guidTianShuVssdkPackage" value="{1b42b89a-be49-4936-92a2-10e127c6f642}" />
+    <GuidSymbol name="guidTianShuVssdkCmdSet" value="{d8c148b7-6cc7-49bc-9e5d-f23a215a8c9d}">
+      <IDSymbol name="cmdidShowTianShuConversation" value="0x0101" />
+      <IDSymbol name="cmdidTianShuNewSession" value="0x0102" />
+      <IDSymbol name="cmdidTianShuAddCurrentFile" value="0x0103" />
+      <IDSymbol name="cmdidTianShuAddSelection" value="0x0104" />
+      <IDSymbol name="cmdidTianShuAddSpecifiedFile" value="0x0105" />
+      <IDSymbol name="cmdidTianShuReconnectRuntime" value="0x0106" />
+      <IDSymbol name="cmdidTianShuSettings" value="0x0107" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

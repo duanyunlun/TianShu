@@ -1,0 +1,22 @@
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Id="TianShu.VSSDK.VSExtension.2383f9da-dce9-44c2-a4d3-6b450ddd3dd9" Version="0.1.3" Language="zh-CN" Publisher="TianShu" />
+    <DisplayName>TianShu VSSDK Extension</DisplayName>
+    <Description xml:space="preserve">TianShu 的 Visual Studio 最小会话扩展，通过 Sidecar 消费 TianShu 执行运行时的最小会话扩展。</Description>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[18.0, )"><ProductArchitecture>amd64</ProductArchitecture></InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[18.0, )"><ProductArchitecture>amd64</ProductArchitecture></InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[18.0, )"><ProductArchitecture>amd64</ProductArchitecture></InstallationTarget>
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" Version="[4.7.2,)" />
+  </Dependencies>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[18.0, )" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" Path="TianShu.VSSDK.VSExtension.pkgdef" />
+  </Assets>
+</PackageManifest>
+

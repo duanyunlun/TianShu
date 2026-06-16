@@ -1,0 +1,142 @@
+<mxfile host="65bd71144e">
+    <diagram id="tianshu-architecture-progress" name="TianShu架构开发进度图">
+        <mxGraphModel dx="2606" dy="1139" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1600" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="TianShu 架构开发进度图" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=28;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="20" width="720" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="subtitle" value="快照日期：2026-05-06　分支：refactor/contracts-first　颜色语义：灰色=尚未开发，浅蓝色=当前正在实施，黄色=已启动但非当前焦点，绿色=已开发完且单测通过，红色=已开发完但有单测未通过" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="62" width="1600" height="24" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendTitle" value="图例" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=18;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="20" width="100" height="24" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendTodo" value="尚未开发" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d9d9d9;strokeColor=#666666;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="50" width="160" height="34" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendActive" value="当前正在实施" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6fa8dc;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="90" width="160" height="34" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendDoing" value="已启动但非当前焦点" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="130" width="160" height="34" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendDone" value="已开发完且单测通过" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="170" width="160" height="34" as="geometry"/>
+                </mxCell>
+                <mxCell id="legendBlocked" value="已开发完但单测未通过" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e06666;strokeColor=#990000;fontColor=#ffffff;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1680" y="210" width="160" height="34" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeExperience" value="体验层 / Experience Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="120" width="1580" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="xp1" value="CLI 命令行&lt;br&gt;参考消费面与 formal surface 已收口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="160" width="450" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="xp2" value="VSIX / Sidecar 宿主&lt;br&gt;保留最小消费面与必要架构锁" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="160" width="450" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="xp3" value="Web / Service / 嵌入式宿主&lt;br&gt;仍未并入当前主线仓库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d9d9d9;strokeColor=#666666;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="160" width="330" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeHost" value="宿主 SDK / 网关层 / Host SDK / Gateway Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="270" width="1580" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="hp1" value="TianShu.Contracts.Host&lt;br&gt;契约与测试已完成" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="320" width="450" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="hp2" value="Host Gateway typed surface&lt;br&gt;诊断、目录、代理与投影入口已收口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="320" width="450" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="hp3" value="HostViewUpdate 真物化&lt;br&gt;真实 snapshot / reset 已接回" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1050" y="320" width="330" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeControl" value="控制平面 / Control Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="420" width="1580" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp1" value="协作 / 交互 / 参与者 Contracts&lt;br&gt;已落地并通过测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="480" width="280" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp2" value="会话 / 线程 / 工作流 Contracts&lt;br&gt;已落地并通过测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="370" y="480" width="280" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp3" value="代理 / 治理 / 目录 / 工件 / 诊断 / 投影 Contracts&lt;br&gt;已落地并通过测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="670" y="480" width="280" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp4" value="ControlPlane.Abstractions / Runtime Boundary&lt;br&gt;typed surface、运行时入口与消费者脱壳已完成" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="970" y="480" width="280" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp5" value="展示层 / façade typed 契约收口&lt;br&gt;CLI 已作为完整参考消费面，非 CLI 宿主保持最小镜像" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1270" y="480" width="310" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeIdentity" value="核心内核层 / Kernel / Core Loop Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="600" width="1580" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="im1" value="StageGraph / Core Loop&lt;br&gt;核心决策语义已出现，边界仍待收紧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="650" width="430" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="im2" value="Turn / Session Orchestrator&lt;br&gt;route planning、orchestration state、checkpoint 归入 Kernel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="610" y="650" width="430" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="im3" value="Context Ledger / Model Route Resolver&lt;br&gt;不依赖 Hosting，不绑定具体 provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1110" y="650" width="430" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeExecution" value="执行运行时层 / Execution Runtime Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="750" width="1580" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="ep1" value="Execution Runtime Contracts&lt;br&gt;turn/session/provider/tool 执行契约已落地" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="795" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="ep2" value="Turn Runtime / Provider Pipeline&lt;br&gt;执行主链已落地，继续从 AppHost 抽离核心语义" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="590" y="795" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="ep3" value="Tool Dispatch / Stream / Runtime Commands&lt;br&gt;执行细节已有实现，边界继续收敛" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffd966;strokeColor=#b58900;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1110" y="795" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="planeState" value="模块层 / Module Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=18;fontStyle=1;align=left;verticalAlign=top;spacing=12;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="900" width="1580" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="sp1" value="Provider / Tools / Environment Modules&lt;br&gt;通过 contracts/abstractions 装配，可第三方实现" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="940" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="sp2" value="Identity / Memory Modules&lt;br&gt;provider、service、gateway 与宿主接入已完成" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="590" y="940" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="sp3" value="State / Artifact / Diagnostics Modules&lt;br&gt;store、projection、diagnostics sink 与 artifact surface 已落地" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#93c47d;strokeColor=#38761d;fontSize=14;" parent="1" vertex="1">
+                    <mxGeometry x="1110" y="940" width="470" height="52" as="geometry"/>
+                </mxCell>
+                <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="xp2" target="hp2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="hp3" target="cp4" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1210" y="410"/>
+                            <mxPoint x="1090" y="410"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" parent="1" source="im2" target="ep2" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="825" y="720"/>
+                            <mxPoint x="825" y="720"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="cp4" target="im2" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1090" y="578"/>
+                            <mxPoint x="825" y="578"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="ep2" target="sp2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
