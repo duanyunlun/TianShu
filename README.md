@@ -230,7 +230,7 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 
 ### 贡献
 
-欢迎 issue 与 PR。提交前请阅读 [AGENTS.md](AGENTS.md) 了解协作约定与架构纪律。核心原则:**任何实现都必须与架构规范的层边界对齐;跨层交互必须走类型化契约;新功能必须走 `CoreIntent → StageGraph → RuntimeStep` 主线。**
+欢迎 issue 与 PR。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解协作约定与架构纪律。核心原则:**任何实现都必须与架构规范的层边界对齐;跨层交互必须走类型化契约;新功能必须走 `CoreIntent → StageGraph → RuntimeStep` 主线。**
 
 ### 开源协议
 
@@ -431,7 +431,7 @@ TianShu's long-term goal is to become an **engineering-grade, governable, trustw
 
 ### Contributing
 
-Issues and PRs welcome. Please read [AGENTS.md](AGENTS.md) for collaboration conventions and architectural discipline. Core rule: **every implementation must align with the architecture spec's plane boundaries; cross-plane interaction must go through typed contracts; new features must follow the `CoreIntent → StageGraph → RuntimeStep` main line.**
+Issues and PRs welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for collaboration conventions and architectural discipline. Core rule: **every implementation must align with the architecture spec's plane boundaries; cross-plane interaction must go through typed contracts; new features must follow the `CoreIntent → StageGraph → RuntimeStep` main line.**
 
 ### License
 
@@ -442,3 +442,4 @@ Licensed under the **[Apache License 2.0](LICENSE)**.
 <div align="center">
 <sub>天枢 · TianShu — orchestration pivot for trustworthy AI agents</sub>
 </div>
+
