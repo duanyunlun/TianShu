@@ -7,10 +7,6 @@
 
 ### P31.11 · v0.9.1 公有仓库发布同步
 
-- [ ] P31.11.5 同步当前 `master` 到公有仓库 `duanyunlun/TianShu`。
-- [ ] P31.11.6 创建或更新公有仓库 `v0.9.1` GitHub Release，并上传 Windows x64 便携包与 manifest。
-- [ ] P31.11.7 复核公有 Release 资产可见性、下载命名与 manifest 版本。
-
 ## 已完成
 
 ### P31.11 · v0.9.1 公有仓库发布同步
@@ -19,6 +15,9 @@
 - [x] P31.11.2 本地生成 Windows x64 便携包：产物为 `artifacts/release/packages/tianshu-v0.9.1-win-x64.zip` 与对应 `release-manifest.json`。
 - [x] P31.11.3 本地执行发布门禁：manifest、package smoke、release acceptance、public safety scan 与文档发布门禁必须通过。
 - [x] P31.11.4 提交并推送开发仓库 `duanyunlun/TianShu-dev` 的当前 `master`。
+- [x] P31.11.5 同步当前 `master` 到公有仓库 `duanyunlun/TianShu`。
+- [x] P31.11.6 创建或更新公有仓库 `v0.9.1` GitHub Release，并上传 Windows x64 便携包与 manifest。
+- [x] P31.11.7 复核公有 Release 资产可见性、下载命名与 manifest 版本。
 
 ### P31.13 · Kernel Runtime follow-up 能力透传补口
 
