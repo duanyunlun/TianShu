@@ -389,6 +389,329 @@ public enum ContextDropReason
     MissingEvidenceRef = 3,
     LowConfidenceReferenceOnly = 4,
     Duplicate = 5,
+    Superseded = 6,
+    CompressionCandidate = 7,
+}
+
+/// <summary>
+/// 上下文压力触发类型，用于说明为何需要执行结构化上下文管理。
+/// Context-pressure trigger kind explaining why structured context management is needed.
+/// </summary>
+public enum ContextPressureTriggerKind
+{
+    Unspecified = 0,
+    EstimatedInputBudgetExceeded = 1,
+    ProviderUsageHighWatermark = 2,
+    ModelContextWindowNearLimit = 3,
+    MissingUsageFallback = 4,
+    ManualPolicyRequest = 5,
+}
+
+/// <summary>
+/// 上下文取代决策结果。
+/// Context supersede decision disposition.
+/// </summary>
+public enum ContextSupersedeDisposition
+{
+    Unspecified = 0,
+    PreferReplacement = 1,
+    KeepBothWithConflictMarker = 2,
+    DropSuperseded = 3,
+    ReferenceOnlySuperseded = 4,
+}
+
+/// <summary>
+/// Provider usage 或估算 token 形成的上下文管理输入信号。
+/// Context-management input signal built from provider usage or estimated tokens.
+/// </summary>
+public sealed record ContextUsageSignal
+{
+    public ContextUsageSignal(
+        string signalId,
+        string source,
+        bool estimated,
+        int? inputTokens = null,
+        int? outputTokens = null,
+        int? reasoningTokens = null,
+        int? totalTokens = null,
+        int? modelContextWindow = null,
+        string? missingReason = null,
+        MetadataBag? metadata = null)
+    {
+        SignalId = KernelContractGuard.RequiredText(signalId, nameof(signalId));
+        Source = KernelContractGuard.RequiredText(source, nameof(source));
+        Estimated = estimated;
+        InputTokens = NonNegativeOrNull(inputTokens, nameof(inputTokens));
+        OutputTokens = NonNegativeOrNull(outputTokens, nameof(outputTokens));
+        ReasoningTokens = NonNegativeOrNull(reasoningTokens, nameof(reasoningTokens));
+        TotalTokens = NonNegativeOrNull(totalTokens, nameof(totalTokens));
+        ModelContextWindow = NonNegativeOrNull(modelContextWindow, nameof(modelContextWindow));
+        MissingReason = missingReason;
+        Metadata = KernelContractGuard.MetadataOrEmpty(metadata);
+    }
+
+    public string SignalId { get; }
+
+    public string Source { get; }
+
+    public bool Estimated { get; }
+
+    public int? InputTokens { get; }
+
+    public int? OutputTokens { get; }
+
+    public int? ReasoningTokens { get; }
+
+    public int? TotalTokens { get; }
+
+    public int? ModelContextWindow { get; }
+
+    public string? MissingReason { get; }
+
+    public MetadataBag Metadata { get; }
+
+    private static int? NonNegativeOrNull(int? value, string name)
+        => value is null ? null : KernelContractGuard.NonNegative(value.Value, name);
+}
+
+/// <summary>
+/// 上下文压力触发记录。
+/// Context-pressure trigger record.
+/// </summary>
+public sealed record ContextPressureTrigger
+{
+    public ContextPressureTrigger(
+        string triggerId,
+        ContextPressureTriggerKind kind,
+        decimal thresholdRatio,
+        int? thresholdTokens,
+        int observedTokens,
+        int? modelContextWindow = null,
+        bool failClosed = true)
+    {
+        TriggerId = KernelContractGuard.RequiredText(triggerId, nameof(triggerId));
+        Kind = kind is ContextPressureTriggerKind.Unspecified
+            ? throw new ArgumentException("Context pressure trigger kind must be specified.", nameof(kind))
+            : kind;
+        ThresholdRatio = thresholdRatio < 0 ? throw new ArgumentOutOfRangeException(nameof(thresholdRatio), "触发比例不能为负数。") : thresholdRatio;
+        ThresholdTokens = thresholdTokens is null ? null : KernelContractGuard.NonNegative(thresholdTokens.Value, nameof(thresholdTokens));
+        ObservedTokens = KernelContractGuard.NonNegative(observedTokens, nameof(observedTokens));
+        ModelContextWindow = modelContextWindow is null ? null : KernelContractGuard.NonNegative(modelContextWindow.Value, nameof(modelContextWindow));
+        FailClosed = failClosed;
+    }
+
+    public string TriggerId { get; }
+
+    public ContextPressureTriggerKind Kind { get; }
+
+    public decimal ThresholdRatio { get; }
+
+    public int? ThresholdTokens { get; }
+
+    public int ObservedTokens { get; }
+
+    public int? ModelContextWindow { get; }
+
+    public bool FailClosed { get; }
+}
+
+/// <summary>
+/// 上下文分层降级规则。
+/// Context layered-degradation rule.
+/// </summary>
+public sealed record ContextDegradationLayerRule
+{
+    public ContextDegradationLayerRule(
+        string layerId,
+        IReadOnlyList<ContextSourceKind> sourceKinds,
+        ContextProjectionMode defaultProjectionMode,
+        ContextProjectionMode pressureProjectionMode,
+        bool protectedFromDrop,
+        bool protectedFromCompression,
+        int priority)
+    {
+        LayerId = KernelContractGuard.RequiredText(layerId, nameof(layerId));
+        SourceKinds = KernelContractGuard.ListOrEmpty(sourceKinds);
+        if (SourceKinds.Count == 0 || SourceKinds.Any(static kind => kind is ContextSourceKind.Unspecified))
+        {
+            throw new ArgumentException("Context degradation layer must include specified source kinds.", nameof(sourceKinds));
+        }
+
+        DefaultProjectionMode = defaultProjectionMode is ContextProjectionMode.Unspecified
+            ? ContextProjectionMode.Full
+            : defaultProjectionMode;
+        PressureProjectionMode = pressureProjectionMode is ContextProjectionMode.Unspecified
+            ? ContextProjectionMode.ReferenceOnly
+            : pressureProjectionMode;
+        ProtectedFromDrop = protectedFromDrop;
+        ProtectedFromCompression = protectedFromCompression;
+        Priority = KernelContractGuard.NonNegative(priority, nameof(priority));
+    }
+
+    public string LayerId { get; }
+
+    public IReadOnlyList<ContextSourceKind> SourceKinds { get; }
+
+    public ContextProjectionMode DefaultProjectionMode { get; }
+
+    public ContextProjectionMode PressureProjectionMode { get; }
+
+    public bool ProtectedFromDrop { get; }
+
+    public bool ProtectedFromCompression { get; }
+
+    public int Priority { get; }
+}
+
+/// <summary>
+/// 实际上下文降级决策。
+/// Effective context-degradation decision.
+/// </summary>
+public sealed record ContextDegradationDecision(
+    string SegmentId,
+    string LayerId,
+    ContextProjectionMode OriginalMode,
+    ContextProjectionMode EffectiveMode,
+    ContextDropReason? DropReason = null,
+    string? EvidenceRef = null,
+    string? ArtifactRef = null)
+{
+    public string SegmentId { get; } = KernelContractGuard.RequiredText(SegmentId, nameof(SegmentId));
+
+    public string LayerId { get; } = KernelContractGuard.RequiredText(LayerId, nameof(LayerId));
+}
+
+/// <summary>
+/// 上下文事实取代决策。
+/// Context fact supersede decision.
+/// </summary>
+public sealed record ContextSupersedeDecision
+{
+    public ContextSupersedeDecision(
+        string decisionId,
+        string supersededSegmentId,
+        string replacementSegmentId,
+        ContextSupersedeDisposition disposition,
+        string reason,
+        string? evidenceRef = null,
+        string? auditRef = null)
+    {
+        DecisionId = KernelContractGuard.RequiredText(decisionId, nameof(decisionId));
+        SupersededSegmentId = KernelContractGuard.RequiredText(supersededSegmentId, nameof(supersededSegmentId));
+        ReplacementSegmentId = KernelContractGuard.RequiredText(replacementSegmentId, nameof(replacementSegmentId));
+        Disposition = disposition is ContextSupersedeDisposition.Unspecified
+            ? throw new ArgumentException("Context supersede disposition must be specified.", nameof(disposition))
+            : disposition;
+        Reason = KernelContractGuard.RequiredText(reason, nameof(reason));
+        EvidenceRef = evidenceRef;
+        AuditRef = auditRef;
+    }
+
+    public string DecisionId { get; }
+
+    public string SupersededSegmentId { get; }
+
+    public string ReplacementSegmentId { get; }
+
+    public ContextSupersedeDisposition Disposition { get; }
+
+    public string Reason { get; }
+
+    public string? EvidenceRef { get; }
+
+    public string? AuditRef { get; }
+}
+
+/// <summary>
+/// 上下文压缩候选。
+/// Context compression candidate.
+/// </summary>
+public sealed record ContextCompressionCandidate
+{
+    public ContextCompressionCandidate(
+        string candidateId,
+        IReadOnlyList<string> sourceSegmentIds,
+        int originalEstimatedTokens,
+        int targetEstimatedTokens,
+        bool reversible,
+        string reason,
+        string? artifactRef = null,
+        string? evidenceRef = null)
+    {
+        CandidateId = KernelContractGuard.RequiredText(candidateId, nameof(candidateId));
+        SourceSegmentIds = KernelContractGuard.ListOrEmpty(sourceSegmentIds);
+        if (SourceSegmentIds.Count == 0)
+        {
+            throw new ArgumentException("Compression candidate must include source segments.", nameof(sourceSegmentIds));
+        }
+
+        OriginalEstimatedTokens = KernelContractGuard.NonNegative(originalEstimatedTokens, nameof(originalEstimatedTokens));
+        TargetEstimatedTokens = KernelContractGuard.NonNegative(targetEstimatedTokens, nameof(targetEstimatedTokens));
+        Reversible = reversible;
+        Reason = KernelContractGuard.RequiredText(reason, nameof(reason));
+        ArtifactRef = artifactRef;
+        EvidenceRef = evidenceRef;
+    }
+
+    public string CandidateId { get; }
+
+    public IReadOnlyList<string> SourceSegmentIds { get; }
+
+    public int OriginalEstimatedTokens { get; }
+
+    public int TargetEstimatedTokens { get; }
+
+    public bool Reversible { get; }
+
+    public string Reason { get; }
+
+    public string? ArtifactRef { get; }
+
+    public string? EvidenceRef { get; }
+}
+
+/// <summary>
+/// 上下文压缩 checkpoint，保留可回溯来源和审计引用。
+/// Context compression checkpoint preserving source and audit references.
+/// </summary>
+public sealed record ContextCompressionCheckpoint
+{
+    public ContextCompressionCheckpoint(
+        string checkpointId,
+        string candidateId,
+        IReadOnlyList<string> sourceSegmentRefs,
+        string compressedArtifactRef,
+        bool reversible,
+        string policyId,
+        string auditRef)
+    {
+        CheckpointId = KernelContractGuard.RequiredText(checkpointId, nameof(checkpointId));
+        CandidateId = KernelContractGuard.RequiredText(candidateId, nameof(candidateId));
+        SourceSegmentRefs = KernelContractGuard.ListOrEmpty(sourceSegmentRefs);
+        if (SourceSegmentRefs.Count == 0)
+        {
+            throw new ArgumentException("Compression checkpoint must include source segment refs.", nameof(sourceSegmentRefs));
+        }
+
+        CompressedArtifactRef = KernelContractGuard.RequiredText(compressedArtifactRef, nameof(compressedArtifactRef));
+        Reversible = reversible;
+        PolicyId = KernelContractGuard.RequiredText(policyId, nameof(policyId));
+        AuditRef = KernelContractGuard.RequiredText(auditRef, nameof(auditRef));
+    }
+
+    public string CheckpointId { get; }
+
+    public string CandidateId { get; }
+
+    public IReadOnlyList<string> SourceSegmentRefs { get; }
+
+    public string CompressedArtifactRef { get; }
+
+    public bool Reversible { get; }
+
+    public string PolicyId { get; }
+
+    public string AuditRef { get; }
 }
 
 /// <summary>
@@ -528,6 +851,112 @@ public sealed record ApprovedContextPolicy
 }
 
 /// <summary>
+/// Kernel 生成的结构化上下文管理计划，Execution Runtime 只消费其中已批准策略和可审计决策。
+/// Structured context-management plan generated by Kernel; Execution Runtime only consumes the approved policy and auditable decisions.
+/// </summary>
+public sealed record StructuredContextManagementPlan
+{
+    public StructuredContextManagementPlan(
+        string planId,
+        ContextUsageSignal usageSignal,
+        ApprovedContextPolicy approvedPolicy,
+        IReadOnlyList<ContextPressureTrigger>? triggers = null,
+        IReadOnlyList<ContextDegradationLayerRule>? layerRules = null,
+        IReadOnlyList<ContextSupersedeDecision>? supersedeDecisions = null,
+        IReadOnlyList<ContextCompressionCandidate>? compressionCandidates = null,
+        MetadataBag? metadata = null)
+    {
+        PlanId = KernelContractGuard.RequiredText(planId, nameof(planId));
+        UsageSignal = usageSignal ?? throw new ArgumentNullException(nameof(usageSignal));
+        ApprovedPolicy = approvedPolicy ?? throw new ArgumentNullException(nameof(approvedPolicy));
+        Triggers = KernelContractGuard.ListOrEmpty(triggers);
+        LayerRules = KernelContractGuard.ListOrEmpty(layerRules);
+        SupersedeDecisions = KernelContractGuard.ListOrEmpty(supersedeDecisions);
+        CompressionCandidates = KernelContractGuard.ListOrEmpty(compressionCandidates);
+        Metadata = KernelContractGuard.MetadataOrEmpty(metadata);
+    }
+
+    public string PlanId { get; }
+
+    public ContextUsageSignal UsageSignal { get; }
+
+    public IReadOnlyList<ContextPressureTrigger> Triggers { get; }
+
+    public IReadOnlyList<ContextDegradationLayerRule> LayerRules { get; }
+
+    public IReadOnlyList<ContextSupersedeDecision> SupersedeDecisions { get; }
+
+    public IReadOnlyList<ContextCompressionCandidate> CompressionCandidates { get; }
+
+    public ApprovedContextPolicy ApprovedPolicy { get; }
+
+    public MetadataBag Metadata { get; }
+}
+
+/// <summary>
+/// 上下文管理审计记录，连接 Kernel 决策、Runtime 执行、诊断和 checkpoint。
+/// Context-management audit record connecting Kernel decisions, Runtime execution, diagnostics, and checkpoints.
+/// </summary>
+public sealed record ContextManagementAuditRecord
+{
+    public ContextManagementAuditRecord(
+        string auditId,
+        string planId,
+        string policyId,
+        string sourceIntentId,
+        string sourceGraphId,
+        string sourceStageId,
+        string sourceKernelOperationId,
+        IReadOnlyList<string>? triggerIds = null,
+        IReadOnlyList<string>? includedSegmentIds = null,
+        IReadOnlyList<string>? droppedSegmentIds = null,
+        IReadOnlyList<string>? compressionCheckpointRefs = null,
+        IReadOnlyList<string>? diagnosticsRefs = null,
+        DateTimeOffset? createdAt = null)
+    {
+        AuditId = KernelContractGuard.RequiredText(auditId, nameof(auditId));
+        PlanId = KernelContractGuard.RequiredText(planId, nameof(planId));
+        PolicyId = KernelContractGuard.RequiredText(policyId, nameof(policyId));
+        SourceIntentId = KernelContractGuard.RequiredText(sourceIntentId, nameof(sourceIntentId));
+        SourceGraphId = KernelContractGuard.RequiredText(sourceGraphId, nameof(sourceGraphId));
+        SourceStageId = KernelContractGuard.RequiredText(sourceStageId, nameof(sourceStageId));
+        SourceKernelOperationId = KernelContractGuard.RequiredText(sourceKernelOperationId, nameof(sourceKernelOperationId));
+        TriggerIds = KernelContractGuard.ListOrEmpty(triggerIds);
+        IncludedSegmentIds = KernelContractGuard.ListOrEmpty(includedSegmentIds);
+        DroppedSegmentIds = KernelContractGuard.ListOrEmpty(droppedSegmentIds);
+        CompressionCheckpointRefs = KernelContractGuard.ListOrEmpty(compressionCheckpointRefs);
+        DiagnosticsRefs = KernelContractGuard.ListOrEmpty(diagnosticsRefs);
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow;
+    }
+
+    public string AuditId { get; }
+
+    public string PlanId { get; }
+
+    public string PolicyId { get; }
+
+    public string SourceIntentId { get; }
+
+    public string SourceGraphId { get; }
+
+    public string SourceStageId { get; }
+
+    public string SourceKernelOperationId { get; }
+
+    public IReadOnlyList<string> TriggerIds { get; }
+
+    public IReadOnlyList<string> IncludedSegmentIds { get; }
+
+    public IReadOnlyList<string> DroppedSegmentIds { get; }
+
+    public IReadOnlyList<string> CompressionCheckpointRefs { get; }
+
+    public IReadOnlyList<string> DiagnosticsRefs { get; }
+
+    public DateTimeOffset CreatedAt { get; }
+}
+
+/// <summary>
 /// 候选上下文片段，进入 Execution Runtime 前必须仍保持 provider-neutral。
 /// Candidate context segment that remains provider-neutral before entering Execution Runtime.
 /// </summary>
@@ -591,7 +1020,14 @@ public sealed record MaterializedContextSegment(
     ContextProjectionMode ProjectionMode,
     int EstimatedTokens,
     string? EvidenceRef = null,
-    string? ArtifactRef = null);
+    string? ArtifactRef = null,
+    string? SourceLayer = null,
+    string? TriggerRef = null,
+    string? SupersedeDecisionRef = null,
+    ContextSupersedeDisposition? SupersedeDisposition = null,
+    string? CompressionCheckpointRef = null,
+    string? AuditRef = null,
+    string? TraceRef = null);
 
 /// <summary>
 /// 被排除的上下文片段，必须保留可诊断原因。
@@ -603,7 +1039,15 @@ public sealed record DroppedContextSegment(
     ContextDropReason Reason,
     int EstimatedTokens,
     string? EvidenceRef = null,
-    string? ArtifactRef = null);
+    string? ArtifactRef = null,
+    string? SourceLayer = null,
+    string? TriggerRef = null,
+    string? SupersedeDecisionRef = null,
+    ContextSupersedeDisposition? SupersedeDisposition = null,
+    string? CompressionCandidateRef = null,
+    string? CompressionCheckpointRef = null,
+    string? AuditRef = null,
+    string? TraceRef = null);
 
 /// <summary>
 /// ContextPolicy 执行报告，供 diagnostics、trace 和 Host projection 使用。
@@ -617,7 +1061,17 @@ public sealed record ContextPolicyApplicationReport
         int estimatedTotalTokens,
         int estimatedIncludedTokens,
         IReadOnlyList<MaterializedContextSegment>? includedSegments = null,
-        IReadOnlyList<DroppedContextSegment>? droppedSegments = null)
+        IReadOnlyList<DroppedContextSegment>? droppedSegments = null,
+        IReadOnlyList<ContextDegradationDecision>? degradationDecisions = null,
+        IReadOnlyList<ContextSupersedeDecision>? supersedeDecisions = null,
+        IReadOnlyList<ContextCompressionCandidate>? compressionCandidates = null,
+        IReadOnlyList<ContextCompressionCheckpoint>? compressionCheckpoints = null,
+        IReadOnlyList<string>? triggerRefs = null,
+        IReadOnlyList<string>? diagnosticsRefs = null,
+        IReadOnlyList<string>? traceRefs = null,
+        string? planId = null,
+        string? auditRef = null,
+        ContextUsageSignal? usageSignal = null)
     {
         PolicyId = KernelContractGuard.RequiredText(policyId, nameof(policyId));
         MaxInputTokens = KernelContractGuard.NonNegative(maxInputTokens, nameof(maxInputTokens));
@@ -625,6 +1079,16 @@ public sealed record ContextPolicyApplicationReport
         EstimatedIncludedTokens = KernelContractGuard.NonNegative(estimatedIncludedTokens, nameof(estimatedIncludedTokens));
         IncludedSegments = KernelContractGuard.ListOrEmpty(includedSegments);
         DroppedSegments = KernelContractGuard.ListOrEmpty(droppedSegments);
+        DegradationDecisions = KernelContractGuard.ListOrEmpty(degradationDecisions);
+        SupersedeDecisions = KernelContractGuard.ListOrEmpty(supersedeDecisions);
+        CompressionCandidates = KernelContractGuard.ListOrEmpty(compressionCandidates);
+        CompressionCheckpoints = KernelContractGuard.ListOrEmpty(compressionCheckpoints);
+        TriggerRefs = KernelContractGuard.ListOrEmpty(triggerRefs);
+        DiagnosticsRefs = KernelContractGuard.ListOrEmpty(diagnosticsRefs);
+        TraceRefs = KernelContractGuard.ListOrEmpty(traceRefs);
+        PlanId = planId;
+        AuditRef = auditRef;
+        UsageSignal = usageSignal;
     }
 
     public string PolicyId { get; }
@@ -638,6 +1102,26 @@ public sealed record ContextPolicyApplicationReport
     public IReadOnlyList<MaterializedContextSegment> IncludedSegments { get; }
 
     public IReadOnlyList<DroppedContextSegment> DroppedSegments { get; }
+
+    public IReadOnlyList<ContextDegradationDecision> DegradationDecisions { get; }
+
+    public IReadOnlyList<ContextSupersedeDecision> SupersedeDecisions { get; }
+
+    public IReadOnlyList<ContextCompressionCandidate> CompressionCandidates { get; }
+
+    public IReadOnlyList<ContextCompressionCheckpoint> CompressionCheckpoints { get; }
+
+    public IReadOnlyList<string> TriggerRefs { get; }
+
+    public IReadOnlyList<string> DiagnosticsRefs { get; }
+
+    public IReadOnlyList<string> TraceRefs { get; }
+
+    public string? PlanId { get; }
+
+    public string? AuditRef { get; }
+
+    public ContextUsageSignal? UsageSignal { get; }
 }
 
 /// <summary>

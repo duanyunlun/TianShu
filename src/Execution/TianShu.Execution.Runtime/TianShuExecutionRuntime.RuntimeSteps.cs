@@ -1,5 +1,7 @@
+using System.Globalization;
 using TianShu.Contracts.Execution;
 using TianShu.Contracts.Kernel;
+using TianShu.Contracts.Memory;
 using TianShu.Contracts.Primitives;
 
 namespace TianShu.Execution.Runtime;
@@ -81,10 +83,58 @@ public sealed partial class TianShuExecutionRuntime
             return await toolBridge.ExecuteAsync(boundToolStep, context, tool, cancellationToken).ConfigureAwait(false);
         }
 
+        if (step is ToolInvocationStep unboundShellStep
+            && IsShellToolId(unboundShellStep.CapabilityToolId))
+        {
+            return CreateBlockedStepResult(
+                unboundShellStep,
+                context.ExecutionId,
+                new ExecutionFailure("shell_tool_not_opened", "Shell ToolInvocationStep 缺少真实 shell tool binding，已失败关闭。"));
+        }
+
+        if (step is ToolInvocationStep unboundMcpStep
+            && IsMcpToolId(unboundMcpStep.CapabilityToolId))
+        {
+            return CreateBlockedStepResult(
+                unboundMcpStep,
+                context.ExecutionId,
+                new ExecutionFailure(
+                    unboundMcpStep.CapabilityToolId.StartsWith("mcp.", StringComparison.Ordinal)
+                        ? "mcp_tool_not_opened"
+                        : "mcp_resource_not_opened",
+                    "MCP ToolInvocationStep 缺少真实 MCP tool/resource binding，已失败关闭。"));
+        }
+
         if (step is ModuleCapabilityStep subAgentStep
             && stepBindingRegistry.TryGetSubAgentModule(subAgentStep.ModuleId, out var subAgentModule))
         {
             return await subAgentModuleBridge.ExecuteSpawnAsync(subAgentStep, context, subAgentModule, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (step is ModuleCapabilityStep memoryStep
+            && stepBindingRegistry.TryGetMemoryModule(memoryStep.ModuleId, out var memoryModule))
+        {
+            var memoryOperation = CreateMemoryModuleOperation(memoryStep);
+            if (memoryOperation.Failure is not null)
+            {
+                return CreateBlockedStepResult(memoryStep, context.ExecutionId, memoryOperation.Failure);
+            }
+
+            var operationContext = CreateMemoryOperationContext(memoryStep);
+            if (memoryOperation.Query is not null)
+            {
+                return await memoryModuleBridge.ExecuteQueryAsync(memoryStep, context, memoryModule, memoryOperation.Query, operationContext, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await memoryModuleBridge.ExecuteMutationAsync(memoryStep, context, memoryModule, memoryOperation.Mutation!, operationContext, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (step is ModuleCapabilityStep { ModuleId: "memory.identity" } unboundMemoryStep)
+        {
+            return CreateBlockedStepResult(
+                unboundMemoryStep,
+                context.ExecutionId,
+                new ExecutionFailure("memory_module_not_bound", "Memory ModuleCapabilityStep 缺少真实 IMemoryModule 绑定。"));
         }
 
         if (step is ModuleCapabilityStep { ModuleId: "module.sub_agent" } unboundSubAgentStep)
@@ -427,4 +477,160 @@ public sealed partial class TianShuExecutionRuntime
         => string.IsNullOrWhiteSpace(suffix)
             ? $"trace://execution/{executionId.Value}/{subject}"
             : $"trace://execution/{executionId.Value}/{subject}/{suffix}";
+
+    private static bool IsShellToolId(string toolId)
+        => string.Equals(toolId, "shell", StringComparison.Ordinal)
+           || string.Equals(toolId, "local_shell", StringComparison.Ordinal)
+           || string.Equals(toolId, "shell_command", StringComparison.Ordinal)
+           || string.Equals(toolId, "exec_command", StringComparison.Ordinal)
+           || string.Equals(toolId, "write_stdin", StringComparison.Ordinal);
+
+    private static bool IsMcpToolId(string toolId)
+        => toolId.StartsWith("mcp.", StringComparison.Ordinal)
+           || string.Equals(toolId, "list_mcp_resources", StringComparison.Ordinal)
+           || string.Equals(toolId, "list_mcp_resource_templates", StringComparison.Ordinal)
+           || string.Equals(toolId, "read_mcp_resource", StringComparison.Ordinal);
+
+    private sealed record MemoryRuntimeOperation(
+        MemoryModuleQuery? Query = null,
+        MemoryModuleMutation? Mutation = null,
+        ExecutionFailure? Failure = null);
+
+    private static MemoryRuntimeOperation CreateMemoryModuleOperation(ModuleCapabilityStep step)
+        => step.CapabilityId switch
+        {
+            "memory.retrieve" => CreateMemoryRetrieveOperation(step),
+            "memory.form" => CreateMemoryFormOperation(step),
+            "memory.supersede" => CreateMemorySupersedeOperation(step),
+            _ => new MemoryRuntimeOperation(Failure: new ExecutionFailure(
+                "memory_module_capability_not_opened",
+                $"Memory Module capability 未作为 P27.14 正式能力开放：{step.CapabilityId}。")),
+        };
+
+    private static MemoryRuntimeOperation CreateMemoryRetrieveOperation(ModuleCapabilityStep step)
+    {
+        var queryText = ReadString(step.InputEnvelope, "queryText")
+                        ?? ReadString(step.InputEnvelope, "query")
+                        ?? ReadString(step.InputEnvelope, "objective");
+        var memorySpaceId = ReadString(step.InputEnvelope, "memorySpaceId");
+        var key = ReadString(step.InputEnvelope, "key");
+        return new MemoryRuntimeOperation(Query: new FilterMemoryModuleQuery(new FilterMemory(
+            string.IsNullOrWhiteSpace(memorySpaceId) ? null : new MemorySpaceId(memorySpaceId),
+            key,
+            queryText)));
+    }
+
+    private static MemoryRuntimeOperation CreateMemoryFormOperation(ModuleCapabilityStep step)
+    {
+        var memorySpaceId = ReadString(step.InputEnvelope, "memorySpaceId");
+        var key = ReadString(step.InputEnvelope, "key");
+        var value = ReadValue(step.InputEnvelope, "value");
+        if (string.IsNullOrWhiteSpace(memorySpaceId) || string.IsNullOrWhiteSpace(key) || value is null)
+        {
+            return new MemoryRuntimeOperation(Failure: new ExecutionFailure(
+                "memory_form_payload_invalid",
+                "memory.form 需要 memorySpaceId、key 和 value。"));
+        }
+
+        return new MemoryRuntimeOperation(Mutation: new AddMemoryModuleMutation(new AddMemory(
+            new MemorySpaceId(memorySpaceId),
+            key,
+            value,
+            ReadDecimal(step.InputEnvelope, "confidence") ?? 1m,
+            CreateMemorySource(step))));
+    }
+
+    private static MemoryRuntimeOperation CreateMemorySupersedeOperation(ModuleCapabilityStep step)
+    {
+        var oldRecordId = ReadString(step.InputEnvelope, "oldRecordId");
+        var memorySpaceId = ReadString(step.InputEnvelope, "memorySpaceId");
+        var newKey = ReadString(step.InputEnvelope, "newKey") ?? ReadString(step.InputEnvelope, "key");
+        var newValue = ReadValue(step.InputEnvelope, "newValue") ?? ReadValue(step.InputEnvelope, "value");
+        var reason = ReadString(step.InputEnvelope, "reason");
+        if (string.IsNullOrWhiteSpace(oldRecordId)
+            || string.IsNullOrWhiteSpace(memorySpaceId)
+            || string.IsNullOrWhiteSpace(newKey)
+            || newValue is null
+            || string.IsNullOrWhiteSpace(reason))
+        {
+            return new MemoryRuntimeOperation(Failure: new ExecutionFailure(
+                "memory_supersede_payload_invalid",
+                "memory.supersede 需要 oldRecordId、memorySpaceId、newKey/newValue 和 reason。"));
+        }
+
+        return new MemoryRuntimeOperation(Mutation: new SupersedeMemoryModuleMutation(new SupersedeMemory(
+            new MemoryRecordId(oldRecordId),
+            new MemorySpaceId(memorySpaceId),
+            newKey,
+            newValue,
+            reason,
+            ReadDecimal(step.InputEnvelope, "confidence") ?? 1m,
+            CreateMemorySource(step))));
+    }
+
+    private static MemoryOperationContext CreateMemoryOperationContext(ModuleCapabilityStep step)
+        => new(
+            ReadString(step.InputEnvelope, "actorId") ?? "execution.runtime",
+            correlationId: step.StepId,
+            policyOverrides: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["sourceIntentId"] = step.SourceIntentId.Value,
+                ["sourceGraphId"] = step.SourceGraphId.Value,
+                ["sourceStageId"] = step.SourceStageId.Value,
+                ["sourceKernelOperationId"] = step.SourceKernelOperationId.Value,
+                ["capabilityId"] = step.CapabilityId,
+            });
+
+    private static MemorySourceRef? CreateMemorySource(ModuleCapabilityStep step)
+    {
+        var sourceId = ReadString(step.InputEnvelope, "sourceId");
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return null;
+        }
+
+        var sourceKind = ReadEnum(step.InputEnvelope, "sourceKind", MemorySourceKind.Conversation);
+        return new MemorySourceRef(
+            sourceKind,
+            sourceId,
+            role: ReadString(step.InputEnvelope, "sourceRole"),
+            path: ReadString(step.InputEnvelope, "sourcePath"),
+            url: ReadString(step.InputEnvelope, "sourceUrl"),
+            snippet: ReadString(step.InputEnvelope, "sourceSnippet"));
+    }
+
+    private static StructuredValue? ReadValue(StructuredValue envelope, string key)
+        => envelope.Kind == StructuredValueKind.Object && envelope.Properties.TryGetValue(key, out var value)
+            ? value
+            : null;
+
+    private static string? ReadString(StructuredValue envelope, string key)
+    {
+        var value = ReadValue(envelope, key);
+        if (value is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return value.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static decimal? ReadDecimal(StructuredValue envelope, string key)
+    {
+        var value = ReadString(envelope, key);
+        return decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+    }
+
+    private static TEnum ReadEnum<TEnum>(StructuredValue envelope, string key, TEnum fallback)
+        where TEnum : struct
+        => Enum.TryParse<TEnum>(ReadString(envelope, key), ignoreCase: true, out var parsed)
+            ? parsed
+            : fallback;
 }

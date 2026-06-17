@@ -96,7 +96,7 @@ internal sealed class ShellToolHandler : ITianShuToolHandler
             .ConfigureAwait(false);
         if (!result.Success)
         {
-            return ShellToolResultFactory.Failure(request, result.OutputText);
+            return ShellToolResultFactory.Failure(request, result.OutputText, result.FailureCode, result.StructuredOutput);
         }
 
         return ShellToolResultFactory.Success(
@@ -156,11 +156,16 @@ internal static class ShellToolResultFactory
             request.ToolKey,
             [new ToolStreamItem("text", payload, isTerminal: true)]);
 
-    public static ToolInvocationResult Failure(ToolInvocationRequest request, string message)
+    public static ToolInvocationResult Failure(
+        ToolInvocationRequest request,
+        string message,
+        string? code = null,
+        StructuredValue? payload = null)
         => new(
             request.CallId,
             request.ToolKey,
-            failure: new ToolInvocationFailure($"{request.ToolKey}.invalid_request", message));
+            payload is null ? null : [new ToolStreamItem("text", payload, isTerminal: true)],
+            failure: new ToolInvocationFailure(code ?? $"{request.ToolKey}.invalid_request", message));
 }
 
 internal static class ShellToolSchemas
@@ -224,6 +229,12 @@ internal static class ShellToolSchemas
             {
                 type = "number",
                 description = "The timeout for the command in milliseconds",
+            },
+            ["env"] = new
+            {
+                type = "object",
+                description = "Optional environment overrides. Sensitive keys are rejected by the governed runtime boundary.",
+                additionalProperties = new { type = "string" },
             },
             ["sandbox_permissions"] = new
             {

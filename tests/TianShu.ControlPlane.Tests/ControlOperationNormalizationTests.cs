@@ -104,6 +104,76 @@ public sealed class ControlOperationNormalizationTests
     }
 
     [Fact]
+    public void Normalize_ShouldClassifyRemoteCommandIngressOperations()
+    {
+        Assert.Equal(ControlOperationKind.CoreIntent, ControlOperationNormalizer.Default.Classify("remote.submit_message"));
+        Assert.Equal(ControlOperationKind.CoreIntent, ControlOperationNormalizer.Default.Classify("remote.interrupt"));
+        Assert.Equal(ControlOperationKind.CoreIntent, ControlOperationNormalizer.Default.Classify("remote.resume"));
+        Assert.Equal(ControlOperationKind.Governance, ControlOperationNormalizer.Default.Classify("remote.approval_decision"));
+        Assert.Equal(ControlOperationKind.Control, ControlOperationNormalizer.Default.Classify("remote.steer"));
+        Assert.Equal(ControlOperationKind.Control, ControlOperationNormalizer.Default.Classify("remote.cancel_pending_operation"));
+        Assert.Equal(ControlOperationKind.Unspecified, ControlOperationNormalizer.Default.Classify("remote.direct_runtime_write"));
+    }
+
+    [Fact]
+    public void Normalize_ShouldGenerateCoreIntentForRemoteSubmitMessage()
+    {
+        var request = new ControlOperationRequest(
+            "remote-command-001",
+            "remote.submit_message",
+            new ControlOperationSubject(new SessionId("session-remote-001"), new ThreadId("thread-remote-001")),
+            new ControlOperationGovernanceRequest(
+                "remote-command-001-governance",
+                maxSideEffectLevel: SideEffectLevel.ReadOnly,
+                requiresHumanGate: true),
+            StructuredValue.FromObject(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+            {
+                ["user_input_ref"] = StructuredValue.FromString("remote-command:remote-command-001:message"),
+            }));
+
+        var result = ControlOperationNormalizer.Default.Normalize(request);
+
+        Assert.Equal(ControlOperationKind.CoreIntent, result.OperationKind);
+        Assert.Equal(ControlOperationStatus.Accepted, result.Status);
+        var intent = Assert.IsType<TurnIntent>(result.CoreIntent);
+        Assert.Equal("remote-command:remote-command-001:message", intent.UserInputRef);
+        Assert.Equal(SideEffectLevel.ReadOnly, intent.Governance.MaxSideEffectLevel);
+        Assert.True(intent.Governance.RequiresHumanGate);
+    }
+
+    [Fact]
+    public void Normalize_ShouldFailClosedForRemoteControlCommandsWithoutHandler()
+    {
+        var steer = ControlOperationNormalizer.Default.Normalize(new ControlOperationRequest("remote-steer-001", "remote.steer"));
+        var cancel = ControlOperationNormalizer.Default.Normalize(new ControlOperationRequest("remote-cancel-001", "remote.cancel_pending_operation"));
+
+        Assert.Equal(ControlOperationKind.Control, steer.OperationKind);
+        Assert.Equal(ControlOperationStatus.Rejected, steer.Status);
+        Assert.Equal("control.operation.control_handler_missing", Assert.Single(steer.Issues).Code);
+
+        Assert.Equal(ControlOperationKind.Control, cancel.OperationKind);
+        Assert.Equal(ControlOperationStatus.Rejected, cancel.Status);
+        Assert.Equal("control.operation.control_handler_missing", Assert.Single(cancel.Issues).Code);
+    }
+
+    [Fact]
+    public void Normalize_ShouldCreateGovernanceEnvelopeForRemoteApprovalDecision()
+    {
+        var result = ControlOperationNormalizer.Default.Normalize(new ControlOperationRequest(
+            "remote-approval-001",
+            "remote.approval_decision",
+            governance: new ControlOperationGovernanceRequest(
+                "remote-approval-001-governance",
+                maxSideEffectLevel: SideEffectLevel.HostMutation,
+                requiresHumanGate: true)));
+
+        Assert.Equal(ControlOperationKind.Governance, result.OperationKind);
+        Assert.Equal(ControlOperationStatus.Completed, result.Status);
+        Assert.Equal("remote-approval-001-governance", result.GovernanceEnvelope?.EnvelopeId);
+        Assert.True(result.GovernanceEnvelope?.RequiresHumanGate);
+    }
+
+    [Fact]
     public void Normalize_ShouldRejectUnknownOperation()
     {
         var result = ControlOperationNormalizer.Default.Normalize(new ControlOperationRequest("op-unknown-001", "legacy.freeform"));

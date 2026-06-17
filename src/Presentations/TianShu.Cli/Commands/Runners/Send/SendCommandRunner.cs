@@ -211,6 +211,75 @@ internal sealed class SendCommandRunner
             _ = CliFirstRunBootstrapper.EnsureDefaultConfiguration(runtimeOptions.ConfigFilePath);
             resolvedConfig = loader.Load(runtimeOptions.ConfigFilePath, runtimeOptions.ProfileName, runtimeOptions.ConfigOverrides, runtimeOptions.WorkingDirectory);
             RuntimeConfigurationComposition.ApplyToOptions(runtimeOptions, resolvedConfig);
+
+            if (turnPathDecision.UseKernelRuntimeLoop)
+            {
+                var kernelRuntimeWriteCheck = CliRuntimeWriteGuard.CheckKernelRuntimeWorkspace(
+                    resolvedConfig.UserConfigPath,
+                    probeOptions.WorkingDirectory);
+                if (!kernelRuntimeWriteCheck.Available)
+                {
+                    return await BuildTerminalResultAsync(
+                            probeOptions,
+                            startedAt,
+                            events,
+                            assistantText: null,
+                            exitCode: SendCommandExitCode.SendFailed,
+                            runtimeOptions: runtimeOptions,
+                            resolvedConfig: resolvedConfig,
+                            resolvedAppHostProjectPath: resolvedAppHostProjectPath,
+                            threadId: null,
+                            turnId: null,
+                            turnStatus: null,
+                            approvalRequested: false,
+                            permissionRequested: false,
+                            userInputRequested: false,
+                            sawErrorEvent: false,
+                            resumedExistingThread: false,
+                            sendResult: null,
+                            failureMessage: kernelRuntimeWriteCheck.FailureMessage,
+                            cancellationToken: cancellationToken,
+                            turnPathDecision: turnPathDecision,
+                            failureCodeOverride: kernelRuntimeWriteCheck.FailureCode,
+                            skipArtifactWrite: true)
+                        .ConfigureAwait(false);
+                }
+
+                if (!probeOptions.ArtifactsRootExplicit)
+                {
+                    var artifactsWriteCheck = CliRuntimeWriteGuard.CheckTianShuHomeRuntimePath(
+                        CliRuntimeWriteGuard.ResolveTianShuHomeFromConfig(resolvedConfig.UserConfigPath),
+                        probeOptions.WorkingDirectory,
+                        "runs");
+                    if (!artifactsWriteCheck.Available)
+                    {
+                        return await BuildTerminalResultAsync(
+                                probeOptions,
+                                startedAt,
+                                events,
+                                assistantText: null,
+                                exitCode: SendCommandExitCode.SendFailed,
+                                runtimeOptions: runtimeOptions,
+                                resolvedConfig: resolvedConfig,
+                                resolvedAppHostProjectPath: resolvedAppHostProjectPath,
+                                threadId: null,
+                                turnId: null,
+                                turnStatus: null,
+                                approvalRequested: false,
+                                permissionRequested: false,
+                                userInputRequested: false,
+                                sawErrorEvent: false,
+                                resumedExistingThread: false,
+                                sendResult: null,
+                                failureMessage: artifactsWriteCheck.FailureMessage,
+                                cancellationToken: cancellationToken,
+                                turnPathDecision: turnPathDecision,
+                                failureCodeOverride: artifactsWriteCheck.FailureCode,
+                                skipArtifactWrite: true)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
         }
         catch (Exception ex) when (ex is FileNotFoundException or InvalidOperationException or FormatException)
         {
@@ -243,6 +312,9 @@ internal sealed class SendCommandRunner
             KernelRuntimeTurnLoopResult? kernelRuntimeLoopResult = null;
             var enableWorkspaceWrite = probeOptions.ApproveAll && IsApprovalDecisionGranted(probeOptions.ApprovalDecision);
             var enableSubAgents = probeOptions.EnableSubAgents && enableWorkspaceWrite;
+            var enableShell = probeOptions.EnableShell && enableWorkspaceWrite;
+            var enableMcp = probeOptions.EnableMcp;
+            var enableMemory = probeOptions.EnableMemory;
             try
             {
                 await using var subAgentChildRuntime = enableSubAgents
@@ -272,7 +344,10 @@ internal sealed class SendCommandRunner
                             SubAgentApprovalId: enableSubAgents
                                 ? new ApprovalId($"approval-cli-kernel-subagent-{Guid.NewGuid():N}")
                                 : null,
-                            SubAgentModules: subAgentModules),
+                            SubAgentModules: subAgentModules,
+                            EnableShell: enableShell,
+                            EnableMcp: enableMcp,
+                            EnableMemory: enableMemory),
                         cancellationToken)
                     .ConfigureAwait(false);
                 sendResult = kernelRuntimeLoopResult.SendResult;
@@ -382,7 +457,9 @@ internal sealed class SendCommandRunner
         string? autoResponseFailureMessage = null,
         KernelRuntimeTurnLoopResult? kernelRuntimeLoopResult = null,
         Exception? failureException = null,
-        KernelRuntimeTurnPathDecision? turnPathDecision = null)
+        KernelRuntimeTurnPathDecision? turnPathDecision = null,
+        string? failureCodeOverride = null,
+        bool skipArtifactWrite = false)
     {
         var completedAt = DateTimeOffset.Now;
         var eventList = events.ToArray();
@@ -433,7 +510,7 @@ internal sealed class SendCommandRunner
             FailureMessage = exitCode == SendCommandExitCode.Success ? null : failureMessage,
             ExecutionPath = turnPathDecision?.ExecutionPath ?? "kernel-runtime-loop",
             FallbackReason = turnPathDecision?.FallbackReason,
-            FailureCode = turnPathDecision?.FailureCode,
+            FailureCode = failureCodeOverride ?? turnPathDecision?.FailureCode,
             RequiredCapabilities = turnPathDecision?.RequiredCapabilities.Select(static item => item.ToString()).ToArray(),
             LegacyFallbackCapabilities = turnPathDecision?.LegacyFallbackCapabilities.Select(static item => item.ToString()).ToArray(),
             KernelRuntimeDisposition = kernelRuntimeLoopResult?.ExecutionResult.Disposition.ToString(),
@@ -458,11 +535,22 @@ internal sealed class SendCommandRunner
             resolvedConfig,
             resolvedAppHostProjectPath,
             probeOptions.ArtifactsRoot,
+            probeOptions.ArtifactsRootExplicit,
             probeOptions.ApproveAll,
             probeOptions.PermissionsJsonPath,
             probeOptions.UserInputJsonPath);
+        if (skipArtifactWrite)
+        {
+            summary.ArtifactsRoot = probeOptions.ArtifactsRoot;
+            summary.ArtifactsRootExplicit = probeOptions.ArtifactsRootExplicit;
+            summary.ArtifactsDirectory = string.Empty;
+            return new SendCommandRunResult(summary, jsonOptions);
+        }
+
         var writer = new SendCommandArtifactsWriter(jsonOptions);
         var artifactResult = await writer.WriteAsync(probeOptions, summary, resolvedOptions, eventList, probeOptions.Message, finalResultText, cancellationToken).ConfigureAwait(false);
+        summary.ArtifactsRoot = probeOptions.ArtifactsRoot;
+        summary.ArtifactsRootExplicit = probeOptions.ArtifactsRootExplicit;
         summary.ArtifactsDirectory = artifactResult.RunDirectory;
         await writer.RewriteSummaryAsync(artifactResult.RunDirectory, summary, cancellationToken).ConfigureAwait(false);
 
@@ -628,7 +716,7 @@ internal sealed class SendCommandRunResult
                 $"补录：{BuildUserInputSummary(summary)}",
                 $"协作模式：{summary.CollaborationMode ?? "<none>"}",
                 $"模型：{summary.Model ?? "<unknown>"}",
-                $"产物目录：{summary.ArtifactsDirectory}",
+                $"产物目录：{summary.ArtifactsDirectory}（{(summary.ArtifactsRootExplicit ? "显式指定" : "默认 runtime 根")}）",
                 string.Empty,
                 summary.Success ? summary.ResultText : (summary.FailureMessage ?? summary.ResultText),
             ]);
@@ -810,6 +898,10 @@ internal sealed class ProbeSummary
 
     public JsonElement? AppServerError { get; set; }
 
+    public string ArtifactsRoot { get; set; } = string.Empty;
+
+    public bool ArtifactsRootExplicit { get; set; }
+
     public string ArtifactsDirectory { get; set; } = string.Empty;
 }
 
@@ -877,11 +969,14 @@ internal sealed class ProbeResolvedOptions
 
     public string ArtifactsRoot { get; init; } = string.Empty;
 
+    public bool ArtifactsRootExplicit { get; init; }
+
     public static ProbeResolvedOptions FromRuntimeOptions(
         ControlPlaneInitializeRuntimeCommand? options,
         ResolvedTianShuConfig? config,
         string? appHostProjectPath,
         string artifactsRoot,
+        bool artifactsRootExplicit,
         bool approveAll,
         string? permissionsJsonPath,
         string? userInputJsonPath)
@@ -920,6 +1015,7 @@ internal sealed class ProbeResolvedOptions
             ActiveProfile = config?.ActiveProfile,
             DynamicTools = options?.DynamicTools,
             ArtifactsRoot = artifactsRoot,
+            ArtifactsRootExplicit = artifactsRootExplicit,
         };
 }
 

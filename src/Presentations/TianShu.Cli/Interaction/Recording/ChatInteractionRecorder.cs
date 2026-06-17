@@ -168,6 +168,7 @@ internal sealed class ChatInteractionRecorder(JsonSerializerOptions jsonOptions)
             bootstrap.ResolvedConfig,
             bootstrap.AppHostProjectPath,
             options.ArtifactsRoot!,
+            !string.IsNullOrWhiteSpace(options.ArtifactsRoot),
             options.ApproveAll,
             options.PermissionsJsonPath,
             options.UserInputJsonPath);

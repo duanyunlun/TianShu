@@ -30,9 +30,16 @@ public sealed class RuntimeConfigurationComposition
         => TianShuTomlConfigurationLoader.ApplyToOptions(options, config);
 
     /// <summary>
-    /// 解析默认用户级配置路径。
-    /// Resolves the default user-level configuration path.
+    /// 解析默认配置路径；便携包内运行时优先返回包根配置，否则回退用户级配置。
+    /// Resolves the default config path; portable package execution prefers package-root config, otherwise user-level config.
     /// </summary>
     public static string ResolveDefaultPath()
-        => TianShuTomlConfigurationLoader.ResolveDefaultPath();
+        => TianShuTomlConfigurationLoader.ResolveDefaultPath(AppContext.BaseDirectory);
+
+    /// <summary>
+    /// 从指定程序目录解析默认配置路径，主要供便携包布局测试和宿主探测使用。
+    /// Resolves the default config path from a specific program directory, mainly for portable layout tests and host probing.
+    /// </summary>
+    public static string ResolveDefaultPath(string? programDirectory)
+        => TianShuTomlConfigurationLoader.ResolveDefaultPath(programDirectory);
 }

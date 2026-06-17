@@ -15,10 +15,16 @@ public sealed class KernelAbstractionTests
         {
             typeof(IStableKernelCore),
             typeof(IAdaptiveOrchestrator),
+            typeof(IAdaptiveStageGraphCandidateGenerator),
+            typeof(IAdaptiveCandidateValidationService),
+            typeof(IAdaptiveCandidateTrialService),
             typeof(IKernelValidator),
             typeof(IStageGraphInterpreter),
             typeof(IKernelTraceStore),
             typeof(IKernelEvaluator),
+            typeof(IKernelCrossReviewExperimentService),
+            typeof(IKernelObjectiveAnchorCalibrationService),
+            typeof(IKernelStrategyEvaluationAggregationService),
             typeof(IStrategyRegistry),
         };
 
@@ -33,11 +39,16 @@ public sealed class KernelAbstractionTests
         var reviewPlanMethod = Assert.Single(stableCoreMethods, method => method.Name == nameof(IStableKernelCore.ReviewExecutionPlanAsync));
         var interpreterMethod = Assert.Single(typeof(IStageGraphInterpreter).GetMethods(), method => method.Name == nameof(IStageGraphInterpreter.InterpretAsync));
         var validatorStepMethod = Assert.Single(typeof(IKernelValidator).GetMethods(), method => method.Name == nameof(IKernelValidator.ValidateRuntimeStepAsync));
+        var saveCandidateMethod = Assert.Single(typeof(IStrategyRegistry).GetMethods(), method => method.Name == nameof(IStrategyRegistry.SaveCandidateAsync));
+        var auditRecordsMethod = Assert.Single(typeof(IStrategyRegistry).GetMethods(), method => method.Name == nameof(IStrategyRegistry.ListAuditRecordsAsync));
 
         Assert.Equal(typeof(Task<KernelRunResult>), runMethod.ReturnType);
         Assert.Contains(reviewPlanMethod.GetParameters(), parameter => parameter.ParameterType == typeof(ExecutionPlan));
         Assert.Equal(typeof(Task<ExecutionPlan>), interpreterMethod.ReturnType);
         Assert.Contains(validatorStepMethod.GetParameters(), parameter => parameter.ParameterType == typeof(RuntimeStep));
+        Assert.Equal(typeof(Task<StrategyRecord>), saveCandidateMethod.ReturnType);
+        Assert.Contains(saveCandidateMethod.GetParameters(), parameter => parameter.ParameterType == typeof(IReadOnlyList<StrategyTransitionEvidence>));
+        Assert.Equal(typeof(Task<IReadOnlyList<StrategyLifecycleAuditRecord>>), auditRecordsMethod.ReturnType);
     }
 
     [Fact]

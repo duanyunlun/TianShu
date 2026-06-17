@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TianShu.Contracts.Primitives;
@@ -55,6 +56,7 @@ internal sealed class WriteToolHandler : ITianShuToolHandler
             path = new { type = "string", description = "Workspace-relative file path." },
             content = new { type = "string" },
             append = new { type = "boolean" },
+            expectedBeforeHash = new { type = "string", description = "Optional SHA-256 hash expected before applying the write." },
         },
     });
 
@@ -94,27 +96,91 @@ internal sealed class WriteToolHandler : ITianShuToolHandler
             return MutatingFileSystemToolResult.Failure(request, $"沙箱策略禁止写入路径：{fullPath}");
         }
 
-        var parent = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrWhiteSpace(parent))
+        if (!IsFileChangeApproved(context, fullPath))
         {
-            Directory.CreateDirectory(parent);
+            return MutatingFileSystemToolResult.Failure(
+                request,
+                "workspace mutation approval is required before writing this path.",
+                "workspace_mutation_approval_required");
         }
 
         var append = MutatingFileSystemToolInput.ReadBool(request.Input, "append") ?? false;
-        if (append)
+        var beforeSnapshot = WorkspaceMutationSnapshot.Capture(fullPath);
+        var effectiveExpectedHash = MutatingFileSystemToolInput.ReadString(request.Input, "expectedBeforeHash");
+        if (!string.IsNullOrWhiteSpace(effectiveExpectedHash)
+            && !string.Equals(effectiveExpectedHash, beforeSnapshot.ContentHash, StringComparison.OrdinalIgnoreCase))
         {
-            await File.AppendAllTextAsync(fullPath, content, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await File.WriteAllTextAsync(fullPath, content, cancellationToken).ConfigureAwait(false);
+            return MutatingFileSystemToolResult.Failure(
+                request,
+                "workspace mutation conflict: target hash does not match expectedBeforeHash.",
+                "workspace_mutation_conflict");
         }
 
-        return MutatingFileSystemToolResult.Success(request, $"写入成功：{fullPath}");
+        var originalContent = beforeSnapshot.Exists ? await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false) : string.Empty;
+        var newContent = append ? originalContent + content : content;
+        var plannedAfterHash = WorkspaceMutationSnapshot.ComputeTextHash(newContent);
+        var plan = WorkspaceMutationProjection.CreatePlan(
+            request,
+            context,
+            "write",
+            [
+                WorkspaceMutationProjection.CreateTarget(
+                    path,
+                    fullPath,
+                    beforeSnapshot,
+                    plannedAfterHash,
+                    append ? "append" : beforeSnapshot.Exists ? "overwrite" : "create",
+                    moveToWorkspaceRelativePath: null,
+                    allowsCreate: true),
+            ]);
+
+        var latestSnapshot = WorkspaceMutationSnapshot.Capture(fullPath);
+        if (!string.Equals(latestSnapshot.ContentHash, beforeSnapshot.ContentHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return MutatingFileSystemToolResult.Failure(
+                request,
+                "workspace mutation conflict: target changed after planning.",
+                "workspace_mutation_conflict");
+        }
+
+        try
+        {
+            var parent = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+
+            if (append)
+            {
+                await File.AppendAllTextAsync(fullPath, content, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(fullPath, content, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var compensation = WorkspaceMutationSnapshot.TryRestore(fullPath, beforeSnapshot);
+            return MutatingFileSystemToolResult.Failure(
+                request,
+                $"workspace mutation failed: {ex.Message}",
+                "workspace_mutation_partial_apply_failed",
+                WorkspaceMutationProjection.CreateFailureProblem(plan, compensation));
+        }
+
+        var afterSnapshot = WorkspaceMutationSnapshot.Capture(fullPath);
+        return MutatingFileSystemToolResult.Success(
+            request,
+            WorkspaceMutationProjection.CreateSuccessPayload(plan, [WorkspaceMutationProjection.CreateAppliedTarget(path, fullPath, beforeSnapshot, afterSnapshot)]));
     }
 
     private static bool IsWritePathAllowed(TianShuToolInvocationContext context, string fullPath)
         => context.FileMutationServices?.IsWritePathAllowed(fullPath) == true;
+
+    private static bool IsFileChangeApproved(TianShuToolInvocationContext context, string fullPath)
+        => context.FileMutationServices?.IsFileChangeApproved(fullPath) == true;
 }
 
 internal sealed class ApplyPatchToolHandler : ITianShuToolHandler
@@ -178,16 +244,34 @@ eof_line: "*** End of File" LF
         var patch = MutatingFileSystemToolInput.Normalize(MutatingFileSystemToolInput.ReadString(request.Input, "input"));
         try
         {
-            var output = MutatingApplyPatch.ApplyVerified(
+            var output = MutatingApplyPatch.ApplyVerifiedProjection(
                 patch ?? string.Empty,
                 context.WorkingDirectory,
-                fullPath => context.FileMutationServices?.IsWritePathAllowed(fullPath) == true
-                            || context.FileMutationServices?.IsFileChangeApproved(fullPath) == true);
+                fullPath =>
+                {
+                    if (context.FileMutationServices?.IsWritePathAllowed(fullPath) != true)
+                    {
+                        return false;
+                    }
+
+                    if (context.FileMutationServices?.IsFileChangeApproved(fullPath) != true)
+                    {
+                        throw new MutatingApplyPatchException("workspace mutation approval is required before applying this patch.");
+                    }
+
+                    return true;
+                },
+                request,
+                context);
             return ValueTask.FromResult(MutatingFileSystemToolResult.Success(request, output));
         }
         catch (MutatingApplyPatchException ex)
         {
-            return ValueTask.FromResult(MutatingFileSystemToolResult.Failure(request, $"apply_patch verification failed: {ex.Message}"));
+            return ValueTask.FromResult(MutatingFileSystemToolResult.Failure(
+                request,
+                $"apply_patch verification failed: {ex.Message}",
+                ex.FailureCode ?? MutatingApplyPatchException.ClassifyFailureCode(ex.Message),
+                ex.Problem));
         }
     }
 }
@@ -226,11 +310,208 @@ internal static class MutatingFileSystemToolResult
             request.ToolKey,
             [new ToolStreamItem("text", StructuredValue.FromPlainObject(payload), isTerminal: true)]);
 
-    public static ToolInvocationResult Failure(ToolInvocationRequest request, string message)
+    public static ToolInvocationResult Failure(ToolInvocationRequest request, string message, string? code = null, ProblemDetails? problem = null)
         => new(
             request.CallId,
             request.ToolKey,
-            failure: new ToolInvocationFailure($"{request.ToolKey}.invalid_request", message));
+            failure: new ToolInvocationFailure(code ?? $"{request.ToolKey}.invalid_request", message, problem: problem));
+}
+
+internal sealed record WorkspaceMutationPlanProjection(
+    string PlanId,
+    string ToolId,
+    string Kind,
+    IReadOnlyList<Dictionary<string, object?>> Targets,
+    string ChangePlanArtifactRef,
+    string DiffPreviewRef,
+    string AuditRef,
+    string TraceRef);
+
+internal sealed record WorkspaceMutationSnapshot(bool Exists, string? ContentHash, long? Size, byte[]? Bytes)
+{
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    public static WorkspaceMutationSnapshot Capture(string fullPath)
+    {
+        if (!File.Exists(fullPath))
+        {
+            return new WorkspaceMutationSnapshot(false, null, null, null);
+        }
+
+        var bytes = File.ReadAllBytes(fullPath);
+        return new WorkspaceMutationSnapshot(true, ComputeHash(bytes), bytes.LongLength, bytes);
+    }
+
+    public static string ComputeTextHash(string content)
+        => ComputeHash(Utf8NoBom.GetBytes(content));
+
+    public static Dictionary<string, object?> TryRestore(string fullPath, WorkspaceMutationSnapshot snapshot)
+    {
+        var compensationRef = $"compensation://workspace-mutation/{WorkspaceMutationProjection.CreatePathRefToken(fullPath)}";
+        try
+        {
+            if (snapshot.Exists)
+            {
+                var parent = Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrWhiteSpace(parent))
+                {
+                    Directory.CreateDirectory(parent);
+                }
+
+                File.WriteAllBytes(fullPath, snapshot.Bytes ?? Array.Empty<byte>());
+            }
+            else if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
+
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["status"] = "restored",
+                ["compensationRef"] = compensationRef,
+            };
+        }
+        catch (Exception ex)
+        {
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["status"] = "failed",
+                ["compensationRef"] = compensationRef,
+                ["reason"] = ex.Message,
+            };
+        }
+    }
+
+    private static string ComputeHash(byte[] bytes)
+        => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+}
+
+internal static class WorkspaceMutationProjection
+{
+    public static WorkspaceMutationPlanProjection CreatePlan(
+        ToolInvocationRequest request,
+        TianShuToolInvocationContext context,
+        string kind,
+        IReadOnlyList<Dictionary<string, object?>> targets)
+    {
+        var baseRef = BuildBaseRef(request.CallId);
+        return new WorkspaceMutationPlanProjection(
+            $"{request.CallId.Value}.workspace-mutation-plan",
+            request.ToolKey,
+            kind,
+            targets,
+            $"{baseRef}/change-plan",
+            $"{baseRef}/diff-preview",
+            $"{baseRef}/audit",
+            $"trace://tool/{context.TurnId}/{context.ThreadId}/{request.CallId.Value}");
+    }
+
+    public static Dictionary<string, object?> CreateTarget(
+        string workspaceRelativePath,
+        string fullPath,
+        WorkspaceMutationSnapshot beforeSnapshot,
+        string? plannedAfterHash,
+        string operation,
+        string? moveToWorkspaceRelativePath,
+        bool allowsCreate)
+        => new(StringComparer.Ordinal)
+        {
+            ["workspaceRelativePath"] = workspaceRelativePath,
+            ["resolvedPathRef"] = $"workspace://{SanitizeRefSegment(workspaceRelativePath)}",
+            ["operation"] = operation,
+            ["moveToWorkspaceRelativePath"] = moveToWorkspaceRelativePath,
+            ["expectedBeforeHash"] = beforeSnapshot.ContentHash,
+            ["plannedAfterHash"] = plannedAfterHash,
+            ["requiresExistingFile"] = operation is "delete" or "update" or "move",
+            ["allowsCreate"] = allowsCreate,
+            ["sizeBefore"] = beforeSnapshot.Size,
+            ["fullPathRedacted"] = Path.GetFileName(fullPath),
+        };
+
+    public static Dictionary<string, object?> CreateAppliedTarget(
+        string workspaceRelativePath,
+        string fullPath,
+        WorkspaceMutationSnapshot beforeSnapshot,
+        WorkspaceMutationSnapshot afterSnapshot)
+        => new(StringComparer.Ordinal)
+        {
+            ["workspaceRelativePath"] = workspaceRelativePath,
+            ["resolvedPathRef"] = $"workspace://{SanitizeRefSegment(workspaceRelativePath)}",
+            ["beforeHash"] = beforeSnapshot.ContentHash,
+            ["afterHash"] = afterSnapshot.ContentHash,
+            ["sizeBefore"] = beforeSnapshot.Size,
+            ["sizeAfter"] = afterSnapshot.Size,
+            ["fullPathRedacted"] = Path.GetFileName(fullPath),
+        };
+
+    public static Dictionary<string, object?> CreateSuccessPayload(
+        WorkspaceMutationPlanProjection plan,
+        IReadOnlyList<Dictionary<string, object?>> appliedTargets)
+        => new(StringComparer.Ordinal)
+        {
+            ["runtimeBoundary"] = "tool.workspace_mutation",
+            ["status"] = "succeeded",
+            ["planId"] = plan.PlanId,
+            ["toolId"] = plan.ToolId,
+            ["kind"] = plan.Kind,
+            ["changePlanArtifactRef"] = plan.ChangePlanArtifactRef,
+            ["diffPreviewRef"] = plan.DiffPreviewRef,
+            ["auditRef"] = plan.AuditRef,
+            ["traceRef"] = plan.TraceRef,
+            ["compensationRef"] = null,
+            ["targets"] = plan.Targets,
+            ["appliedTargets"] = appliedTargets,
+        };
+
+    public static ProblemDetails CreateFailureProblem(
+        WorkspaceMutationPlanProjection plan,
+        Dictionary<string, object?> compensation)
+        => new()
+        {
+            Code = ProblemCode.ExternalDependencyFailed,
+            Message = "Workspace mutation failed after planning.",
+            Details = new MetadataBag(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+            {
+                ["workspaceMutation"] = StructuredValue.FromPlainObject(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["planId"] = plan.PlanId,
+                    ["toolId"] = plan.ToolId,
+                    ["kind"] = plan.Kind,
+                    ["changePlanArtifactRef"] = plan.ChangePlanArtifactRef,
+                    ["diffPreviewRef"] = plan.DiffPreviewRef,
+                    ["auditRef"] = plan.AuditRef,
+                    ["traceRef"] = plan.TraceRef,
+                    ["compensation"] = compensation,
+                }),
+            }),
+        };
+
+    public static string SanitizeRefSegment(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            builder.Append(char.IsLetterOrDigit(ch) || ch is '.' or '-' or '_' ? ch : '_');
+        }
+
+        return builder.ToString().Trim('_');
+    }
+
+    public static string CreatePathRefToken(string fullPath)
+    {
+        var leaf = SanitizeRefSegment(Path.GetFileName(fullPath));
+        if (string.IsNullOrWhiteSpace(leaf))
+        {
+            leaf = "path";
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(fullPath))))
+            .ToLowerInvariant()[..12];
+        return $"{leaf}-{hash}";
+    }
+
+    private static string BuildBaseRef(CallId callId)
+        => $"artifact://workspace-mutation/{callId.Value}";
 }
 
 internal static class MutatingFileSystemToolInput
@@ -292,6 +573,41 @@ internal static class MutatingApplyPatch
         var plan = VerifyPlan(hunks, cwdFullPath, canWrite);
         ApplyPlan(plan);
         return BuildSummary(plan);
+    }
+
+    public static Dictionary<string, object?> ApplyVerifiedProjection(
+        string patchText,
+        string cwd,
+        Func<string, bool>? canWrite,
+        ToolInvocationRequest request,
+        TianShuToolInvocationContext context)
+    {
+        var cwdFullPath = Path.GetFullPath(cwd);
+        var hunks = ParsePatch(patchText);
+        if (hunks.Count == 0)
+        {
+            throw new MutatingApplyPatchException("No files were modified.");
+        }
+
+        var plan = VerifyPlan(hunks, cwdFullPath, canWrite);
+        var projection = BuildProjection(plan, request, context);
+        var snapshots = CaptureSnapshots(plan);
+        try
+        {
+            ApplyPlan(plan);
+        }
+        catch (Exception ex) when (ex is not MutatingApplyPatchException)
+        {
+            var compensation = RestoreSnapshots(snapshots);
+            throw new MutatingApplyPatchException($"partial apply failed: {ex.Message}", projection, compensation);
+        }
+        catch (MutatingApplyPatchException ex) when (ex.Problem is null)
+        {
+            var compensation = RestoreSnapshots(snapshots);
+            throw new MutatingApplyPatchException($"partial apply failed: {ex.Message}", projection, compensation);
+        }
+
+        return WorkspaceMutationProjection.CreateSuccessPayload(projection, BuildAppliedTargets(plan, snapshots));
     }
 
     private static List<PatchHunk> ParsePatch(string patchText)
@@ -720,6 +1036,149 @@ internal static class MutatingApplyPatch
         return builder.ToString();
     }
 
+    private static WorkspaceMutationPlanProjection BuildProjection(
+        PatchPlan plan,
+        ToolInvocationRequest request,
+        TianShuToolInvocationContext context)
+        => WorkspaceMutationProjection.CreatePlan(request, context, "apply_patch", BuildTargets(plan));
+
+    private static IReadOnlyList<Dictionary<string, object?>> BuildTargets(PatchPlan plan)
+    {
+        var targets = new List<Dictionary<string, object?>>();
+        foreach (var operation in plan.Operations)
+        {
+            switch (operation)
+            {
+                case AddOperation add:
+                    targets.Add(WorkspaceMutationProjection.CreateTarget(
+                        add.Path,
+                        add.FullPath,
+                        WorkspaceMutationSnapshot.Capture(add.FullPath),
+                        WorkspaceMutationSnapshot.ComputeTextHash(add.Contents),
+                        "add",
+                        moveToWorkspaceRelativePath: null,
+                        allowsCreate: true));
+                    break;
+                case DeleteOperation delete:
+                    targets.Add(WorkspaceMutationProjection.CreateTarget(
+                        delete.Path,
+                        delete.FullPath,
+                        WorkspaceMutationSnapshot.Capture(delete.FullPath),
+                        plannedAfterHash: null,
+                        "delete",
+                        moveToWorkspaceRelativePath: null,
+                        allowsCreate: false));
+                    break;
+                case UpdateOperation update:
+                    targets.Add(WorkspaceMutationProjection.CreateTarget(
+                        update.SourcePath,
+                        update.SourceFullPath,
+                        WorkspaceMutationSnapshot.Capture(update.SourceFullPath),
+                        WorkspaceMutationSnapshot.ComputeTextHash(update.NewContents),
+                        update.DestPath is null ? "update" : "move",
+                        update.DestPath,
+                        allowsCreate: false));
+                    break;
+            }
+        }
+
+        return targets;
+    }
+
+    private static IReadOnlyList<(string Path, WorkspaceMutationSnapshot Snapshot)> CaptureSnapshots(PatchPlan plan)
+    {
+        var snapshots = new List<(string Path, WorkspaceMutationSnapshot Snapshot)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in EnumerateAffectedFullPaths(plan))
+        {
+            if (seen.Add(path))
+            {
+                snapshots.Add((path, WorkspaceMutationSnapshot.Capture(path)));
+            }
+        }
+
+        return snapshots;
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> BuildAppliedTargets(
+        PatchPlan plan,
+        IReadOnlyList<(string Path, WorkspaceMutationSnapshot Snapshot)> beforeSnapshots)
+    {
+        var beforeByPath = beforeSnapshots.ToDictionary(static item => item.Path, static item => item.Snapshot, StringComparer.OrdinalIgnoreCase);
+        var targets = new List<Dictionary<string, object?>>();
+        foreach (var operation in plan.Operations)
+        {
+            switch (operation)
+            {
+                case AddOperation add:
+                    targets.Add(WorkspaceMutationProjection.CreateAppliedTarget(
+                        add.Path,
+                        add.FullPath,
+                        beforeByPath[add.FullPath],
+                        WorkspaceMutationSnapshot.Capture(add.FullPath)));
+                    break;
+                case DeleteOperation delete:
+                    targets.Add(WorkspaceMutationProjection.CreateAppliedTarget(
+                        delete.Path,
+                        delete.FullPath,
+                        beforeByPath[delete.FullPath],
+                        WorkspaceMutationSnapshot.Capture(delete.FullPath)));
+                    break;
+                case UpdateOperation update:
+                    var resultPath = update.DestFullPath ?? update.SourceFullPath;
+                    targets.Add(WorkspaceMutationProjection.CreateAppliedTarget(
+                        update.DestPath ?? update.SourcePath,
+                        resultPath,
+                        beforeByPath[update.SourceFullPath],
+                        WorkspaceMutationSnapshot.Capture(resultPath)));
+                    break;
+            }
+        }
+
+        return targets;
+    }
+
+    private static Dictionary<string, object?> RestoreSnapshots(IReadOnlyList<(string Path, WorkspaceMutationSnapshot Snapshot)> snapshots)
+    {
+        var results = new List<Dictionary<string, object?>>();
+        foreach (var snapshot in snapshots.Reverse())
+        {
+            results.Add(WorkspaceMutationSnapshot.TryRestore(snapshot.Path, snapshot.Snapshot));
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["status"] = results.Any(static item => string.Equals(item.GetValueOrDefault("status") as string, "failed", StringComparison.Ordinal))
+                ? "failed"
+                : "restored",
+            ["items"] = results,
+        };
+    }
+
+    private static IEnumerable<string> EnumerateAffectedFullPaths(PatchPlan plan)
+    {
+        foreach (var operation in plan.Operations)
+        {
+            switch (operation)
+            {
+                case AddOperation add:
+                    yield return add.FullPath;
+                    break;
+                case DeleteOperation delete:
+                    yield return delete.FullPath;
+                    break;
+                case UpdateOperation update:
+                    yield return update.SourceFullPath;
+                    if (update.DestFullPath is not null)
+                    {
+                        yield return update.DestFullPath;
+                    }
+
+                    break;
+            }
+        }
+    }
+
     private static string DeriveNewContentsFromChunks(string fullPath, IReadOnlyList<UpdateFileChunk> chunks)
     {
         string originalContents;
@@ -957,5 +1416,55 @@ internal sealed class MutatingApplyPatchException : Exception
     public MutatingApplyPatchException(string message)
         : base(message)
     {
+    }
+
+    public MutatingApplyPatchException(
+        string message,
+        WorkspaceMutationPlanProjection plan,
+        Dictionary<string, object?> compensation)
+        : base(message)
+    {
+        FailureCode = "workspace_mutation_partial_apply_failed";
+        Problem = WorkspaceMutationProjection.CreateFailureProblem(plan, compensation);
+    }
+
+    public string? FailureCode { get; }
+
+    public ProblemDetails? Problem { get; }
+
+    public static string ClassifyFailureCode(string message)
+    {
+        if (message.Contains("absolute paths", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_absolute_path";
+        }
+
+        if (message.Contains("path escapes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_path_escape";
+        }
+
+        if (message.Contains("outside sandbox", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_write_not_allowed";
+        }
+
+        if (message.Contains("approval is required", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_approval_required";
+        }
+
+        if (message.Contains("Failed to find expected lines", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Failed to find context", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_conflict";
+        }
+
+        if (message.Contains("Failed to read", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workspace_mutation_patch_target_missing";
+        }
+
+        return "workspace_mutation_patch_parse_failed";
     }
 }

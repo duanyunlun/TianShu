@@ -898,6 +898,75 @@ public sealed class TianShuTomlConfigurationLoaderTests
     }
 
     [Fact]
+    public void Load_WhenPortableProgramDirectoryResolved_SkipsSystemLayerAndKeepsProjectLayer()
+    {
+        var originalTianShuHome = Environment.GetEnvironmentVariable("TIANSHU_HOME");
+        var originalSystemRoot = Environment.GetEnvironmentVariable(SystemRootOverrideEnvironmentVariable);
+        var root = CreateTempDirectory();
+        var packageRoot = Path.Combine(root, "portable");
+        var binRoot = Path.Combine(packageRoot, "bin");
+        var modulesRoot = Path.Combine(packageRoot, "modules");
+        var packageConfigPath = Path.Combine(packageRoot, "tianshu.toml");
+        var envHome = Path.Combine(root, "env-home");
+        var systemRoot = Path.Combine(root, "system");
+        var systemConfigPath = Path.Combine(systemRoot, "tianshu.toml");
+        var repoRoot = Path.Combine(root, "repo");
+        var nestedWorkspace = Path.Combine(repoRoot, "src", "feature");
+        var projectConfigPath = Path.Combine(repoRoot, ".tianshu", "tianshu.toml");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("TIANSHU_HOME", envHome);
+            Environment.SetEnvironmentVariable(SystemRootOverrideEnvironmentVariable, systemRoot);
+            Directory.CreateDirectory(binRoot);
+            Directory.CreateDirectory(modulesRoot);
+            Directory.CreateDirectory(envHome);
+            Directory.CreateDirectory(systemRoot);
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".tianshu"));
+            Directory.CreateDirectory(nestedWorkspace);
+            File.WriteAllText(
+                packageConfigPath,
+                $$"""
+                model = "package-model"
+
+                [projects."{{ToTomlPath(repoRoot)}}"]
+                trust_level = "trusted"
+                """,
+                new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(envHome, "tianshu.toml"), "model = \"env-home-model\"\n", new UTF8Encoding(false));
+            File.WriteAllText(systemConfigPath, "model = \"system-model\"\n", new UTF8Encoding(false));
+            File.WriteAllText(projectConfigPath, "model = \"project-model\"\n", new UTF8Encoding(false));
+
+            var loader = new TianShuTomlConfigurationLoader();
+            var config = loader.Load(
+                configFilePath: null,
+                profileOverride: null,
+                configOverrides: null,
+                workingDirectory: nestedWorkspace,
+                programDirectory: binRoot);
+
+            Assert.Equal(packageConfigPath, config.UserConfigPath);
+            Assert.DoesNotContain(config.Layers, static layer => layer.SourceKind == ResolvedTianShuConfigLayerSourceKind.System);
+            Assert.Contains(config.Layers, layer =>
+                layer.SourceKind == ResolvedTianShuConfigLayerSourceKind.User
+                && string.Equals(layer.Path, packageConfigPath, StringComparison.Ordinal));
+            var projectLayer = Assert.Single(config.Layers.Where(static layer => layer.SourceKind == ResolvedTianShuConfigLayerSourceKind.Project));
+            Assert.Equal(projectConfigPath, projectLayer.Path);
+            Assert.True(projectLayer.FileExists);
+            Assert.False(projectLayer.IsDisabled);
+            Assert.Equal("project-model", config.Model);
+            Assert.Equal(projectConfigPath, config.ConfigFilePath);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TIANSHU_HOME", originalTianShuHome);
+            Environment.SetEnvironmentVariable(SystemRootOverrideEnvironmentVariable, originalSystemRoot);
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void Load_WhenDotTianShuDirectoryExistsWithoutConfig_PreservesEmptyProjectLayer()
     {
         var originalTianShuHome = Environment.GetEnvironmentVariable("TIANSHU_HOME");

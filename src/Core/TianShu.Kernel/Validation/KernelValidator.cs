@@ -226,20 +226,50 @@ public sealed class KernelValidator : IKernelValidator
             return RejectedAsync("kernel.strategy.missing", "StrategyRecord 不能为空。", "strategy");
         }
 
-        if (targetState == StrategyLifecycleState.Promoted && (evidence is null || evidence.Count == 0))
+        if (targetState == StrategyLifecycleState.Unspecified)
         {
-            return RejectedAsync("kernel.strategy.missing_evidence", "Strategy 晋升必须包含 trace 和 evaluation evidence。", "strategy.transitionEvidence");
+            return RejectedAsync("kernel.strategy.unspecified_target", "Strategy lifecycle target 不能为 Unspecified。", "strategy.targetState");
+        }
+
+        if (!IsAllowedStrategyTransition(strategy.LifecycleState, targetState))
+        {
+            return RejectedAsync("kernel.strategy.illegal_transition", $"Strategy 不能从 {strategy.LifecycleState} 转换到 {targetState}。", "strategy.targetState");
+        }
+
+        if (targetState is StrategyLifecycleState.Candidate or StrategyLifecycleState.Validated or StrategyLifecycleState.Trial or StrategyLifecycleState.Promoted or StrategyLifecycleState.Deprecated or StrategyLifecycleState.RolledBack
+            && (evidence is null || evidence.Count == 0))
+        {
+            return RejectedAsync("kernel.strategy.missing_evidence", "Strategy lifecycle transition 必须包含 trace 或 evaluation evidence。", "strategy.transitionEvidence");
+        }
+
+        if (targetState == StrategyLifecycleState.Promoted && evidence!.Any(static item => item.MetricRefs.Count == 0))
+        {
+            return RejectedAsync("kernel.strategy.missing_evaluation", "Strategy 晋升必须包含 evaluation metric evidence。", "strategy.transitionEvidence.metricRefs");
         }
 
         if (targetState == StrategyLifecycleState.Promoted
             && context.Governance.RequiresHumanGate
-            && evidence!.All(static item => !item.HumanApproved))
+            && evidence.All(static item => !item.HumanApproved))
         {
             return RejectedAsync("kernel.strategy.missing_human_gate", "高风险 Strategy 晋升必须经过人工 gate。", "strategy.transitionEvidence");
         }
 
         return ApprovedAsync();
     }
+
+    private static bool IsAllowedStrategyTransition(StrategyLifecycleState current, StrategyLifecycleState target)
+        => (current, target) switch
+        {
+            (StrategyLifecycleState.Draft, StrategyLifecycleState.Candidate) => true,
+            (StrategyLifecycleState.Draft, StrategyLifecycleState.Validated) => true,
+            (StrategyLifecycleState.Validated, StrategyLifecycleState.Candidate) => true,
+            (StrategyLifecycleState.Candidate, StrategyLifecycleState.Trial) => true,
+            (StrategyLifecycleState.Validated, StrategyLifecycleState.Trial) => true,
+            (StrategyLifecycleState.Trial, StrategyLifecycleState.Promoted) => true,
+            (StrategyLifecycleState.Promoted, StrategyLifecycleState.Deprecated) => true,
+            (_, StrategyLifecycleState.RolledBack) when current is not StrategyLifecycleState.Unspecified => true,
+            _ => false,
+        };
 
     private static KernelValidationResult ValidateStage(StageGraph graph, StageNode stage)
     {

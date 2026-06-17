@@ -21,7 +21,8 @@ public static class SubAgentGovernanceNarrowing
 
         var requestedToolIds = requested.AllowedToolIds.Count == 0 ? parent.AllowedToolIds : requested.AllowedToolIds;
         var requestedModuleIds = requested.AllowedModuleIds.Count == 0 ? parent.AllowedModuleIds : requested.AllowedModuleIds;
-        var policyIds = Intersect(parent.PolicyIds, requested.PolicyIds);
+        var requestedPolicyIds = requested.PolicyIds.Count == 0 ? parent.PolicyIds : requested.PolicyIds;
+        var policyIds = Intersect(parent.PolicyIds, requestedPolicyIds);
         var toolIds = Intersect(parent.AllowedToolIds, requestedToolIds)
             .Where(static toolId => !string.Equals(toolId, "spawn_agent", StringComparison.Ordinal))
             .ToArray();

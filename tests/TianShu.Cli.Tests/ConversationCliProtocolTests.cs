@@ -178,6 +178,52 @@ public sealed class ConversationCliProtocolTests
     }
 
     [Fact]
+    public void Parse_SendKernelRuntimeLoop_EnableV07Capabilities_WithExplicitFlags_Succeeds()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        var result = ReflectionTestHelper.InvokeStaticMethod(
+            parserType,
+            "Parse",
+            (object)new[]
+            {
+                "send",
+                "--message",
+                "审计仓库并读取记忆",
+                "--kernel-runtime-loop",
+                "--approve-all",
+                "--enable-shell",
+                "--enable-mcp",
+                "--enable-memory",
+            });
+        Assert.NotNull(result);
+
+        var command = ReflectionTestHelper.GetProperty(result!, "Command");
+        Assert.NotNull(command);
+        Assert.Equal("SendCommandOptions", command!.GetType().Name);
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "KernelRuntimeLoop"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableShell"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableMcp"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableMemory"));
+    }
+
+    [Fact]
+    public void Parse_SendKernelRuntimeLoop_EnableShell_WithoutApproveAll_FailsClosed()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        var result = ReflectionTestHelper.InvokeStaticMethod(
+            parserType,
+            "Parse",
+            (object)new[] { "send", "--message", "运行命令", "--kernel-runtime-loop", "--enable-shell" });
+        Assert.NotNull(result);
+
+        Assert.Null(ReflectionTestHelper.GetProperty(result!, "Command"));
+        Assert.Contains(
+            "--enable-shell 需要同时启用 --approve-all",
+            Assert.IsType<string>(ReflectionTestHelper.GetProperty(result, "ErrorMessage")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Parse_SendAppHostControlPlane_ReturnsRemovedPathDiagnostic()
     {
         var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
@@ -670,6 +716,74 @@ public sealed class ConversationCliProtocolTests
     }
 
     [Fact]
+    public void Parse_SendCommand_DefaultArtifactsRootUsesTianShuRuntimeWorkspaceBucket()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        using var environment = new EnvironmentVariableScope(("TIANSHU_HOME", Path.Combine(Path.GetTempPath(), $"tianshu-cli-artifacts-{Guid.NewGuid():N}")));
+        var workspace = Path.Combine(Path.GetTempPath(), $"tianshu-cli-workspace-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            var result = ReflectionTestHelper.InvokeStaticMethod(
+                parserType,
+                "Parse",
+                (object)new[] { "send", "--message", "你好", "--cwd", workspace });
+            Assert.NotNull(result);
+
+            var command = ReflectionTestHelper.GetProperty(result!, "Command");
+            Assert.NotNull(command);
+            var artifactsRoot = Assert.IsType<string>(ReflectionTestHelper.GetProperty(command!, "ArtifactsRoot"));
+            var artifactsRootExplicit = Assert.IsType<bool>(ReflectionTestHelper.GetProperty(command!, "ArtifactsRootExplicit"));
+
+            Assert.Contains(Path.Combine("runtime", "runs", "workspace-"), artifactsRoot, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith(Path.Combine("send"), artifactsRoot, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".tianshu-cli", artifactsRoot, StringComparison.OrdinalIgnoreCase);
+            Assert.False(artifactsRootExplicit);
+            Assert.False(Directory.Exists(Path.Combine(workspace, ".tianshu-cli")));
+        }
+        finally
+        {
+            if (Directory.Exists(workspace))
+            {
+                Directory.Delete(workspace, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Parse_SendCommand_ExplicitArtifactsRootIsMarked()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        var workspace = Path.Combine(Path.GetTempPath(), $"tianshu-cli-workspace-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            var result = ReflectionTestHelper.InvokeStaticMethod(
+                parserType,
+                "Parse",
+                (object)new[] { "send", "--message", "你好", "--cwd", workspace, "--artifacts", ".\\send-artifacts" });
+            Assert.NotNull(result);
+
+            var command = ReflectionTestHelper.GetProperty(result!, "Command");
+            Assert.NotNull(command);
+            var artifactsRoot = Assert.IsType<string>(ReflectionTestHelper.GetProperty(command!, "ArtifactsRoot"));
+            var artifactsRootExplicit = Assert.IsType<bool>(ReflectionTestHelper.GetProperty(command!, "ArtifactsRootExplicit"));
+
+            Assert.EndsWith("send-artifacts", artifactsRoot, StringComparison.OrdinalIgnoreCase);
+            Assert.True(artifactsRootExplicit);
+        }
+        finally
+        {
+            if (Directory.Exists(workspace))
+            {
+                Directory.Delete(workspace, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void Parse_ChatCommand_SetsConfigOverrideAndConfigFile()
     {
         var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
@@ -741,6 +855,68 @@ public sealed class ConversationCliProtocolTests
         Assert.Equal("checkpoint://kernel-runtime/thread-1/turn-1/terminal", ReflectionTestHelper.GetProperty(command, "CheckpointRef"));
         Assert.Equal("resume-token-1", ReflectionTestHelper.GetProperty(command, "ResumeToken"));
         Assert.Equal(17, ReflectionTestHelper.GetProperty(command, "TurnTimeoutSeconds"));
+    }
+
+    [Fact]
+    public void Parse_FollowUpKernelRuntimeSteer_EnableV07Capabilities_WithExplicitFlags_Succeeds()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        var result = ReflectionTestHelper.InvokeStaticMethod(
+            parserType,
+            "Parse",
+            (object)new[]
+            {
+                "follow-up",
+                "--message",
+                "继续并检查工具",
+                "--mode",
+                "steer",
+                "--kernel-runtime-loop",
+                "--resume-thread-id",
+                "thread-1",
+                "--approve-all",
+                "--enable-shell",
+                "--enable-mcp",
+                "--enable-memory",
+            });
+        Assert.NotNull(result);
+
+        var command = ReflectionTestHelper.GetProperty(result!, "Command");
+        Assert.NotNull(command);
+        Assert.Equal("FollowUpCliCommandOptions", command!.GetType().Name);
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "KernelRuntimeLoop"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "ApproveAll"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableShell"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableMcp"));
+        Assert.Equal(true, ReflectionTestHelper.GetProperty(command, "EnableMemory"));
+    }
+
+    [Fact]
+    public void Parse_FollowUpKernelRuntimeSteer_EnableShell_WithoutApproveAll_FailsClosed()
+    {
+        var parserType = ReflectionTestHelper.GetRequiredType(ProbeAssembly, "TianShu.Cli.CliCommandParser");
+        var result = ReflectionTestHelper.InvokeStaticMethod(
+            parserType,
+            "Parse",
+            (object)new[]
+            {
+                "follow-up",
+                "--message",
+                "运行命令",
+                "--mode",
+                "steer",
+                "--kernel-runtime-loop",
+                "--resume-thread-id",
+                "thread-1",
+                "--enable-shell",
+            });
+        Assert.NotNull(result);
+
+        Assert.Null(ReflectionTestHelper.GetProperty(result!, "Command"));
+        Assert.Contains(
+            "--enable-shell 需要同时启用 --approve-all",
+            Assert.IsType<string>(ReflectionTestHelper.GetProperty(result, "ErrorMessage")),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1034,5 +1210,27 @@ public sealed class ConversationCliProtocolTests
         }
 
         throw new DirectoryNotFoundException("未找到 TianShu.sln。");
+    }
+
+    private sealed class EnvironmentVariableScope : IDisposable
+    {
+        private readonly Dictionary<string, string?> previousValues = new(StringComparer.Ordinal);
+
+        public EnvironmentVariableScope(params (string Name, string? Value)[] values)
+        {
+            foreach (var (name, value) in values)
+            {
+                previousValues[name] = Environment.GetEnvironmentVariable(name);
+                Environment.SetEnvironmentVariable(name, value);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var (name, value) in previousValues)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+        }
     }
 }

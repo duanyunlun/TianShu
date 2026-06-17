@@ -8,10 +8,12 @@ using TianShu.Contracts.Governance;
 using TianShu.Contracts.Host;
 using TianShu.Contracts.Identity;
 using TianShu.Contracts.Interactions;
+using TianShu.Contracts.Kernel;
 using TianShu.Contracts.Memory;
 using TianShu.Contracts.Participants;
 using TianShu.Contracts.Primitives;
 using TianShu.Contracts.Projections;
+using TianShu.Contracts.Remote;
 using TianShu.HostGateway;
 using TianShu.ProjectionStores;
 using TianShu.Contracts.Sessions;
@@ -62,6 +64,188 @@ public sealed class HostGatewayTests
         Assert.Equal("catalog-ok", result.Projection?.GetString());
         Assert.Equal("catalog.list", controlPlane.LastUnifiedOperationRequest?.OperationName);
         Assert.Equal("host-op-001", controlPlane.LastUnifiedOperationRequest?.OperationId);
+    }
+
+    [Fact]
+    public async Task RemoteCommandBridge_SubmitsCommandThroughHostGatewayUnifiedEntry()
+    {
+        var controlPlane = new FakeTianShuControlPlane();
+        controlPlane.UnifiedOperationResult = new ControlOperationResult(
+            "remote-command-001",
+            ControlOperationKind.CoreIntent,
+            ControlOperationStatus.Accepted);
+        IHostGateway gateway = new TianShuHostGateway(controlPlane);
+        IRemoteCommandIngress bridge = new RemoteCommandHostGatewayBridge(gateway);
+
+        var command = new RemoteCommandEnvelope<RemoteSubmitMessagePayload>(
+            "remote-command-001",
+            new ThreadId("thread-remote-001"),
+            new DeviceId("device-remote-001"),
+            new SessionId("session-remote-001"),
+            new RemoteSubmitMessagePayload("继续执行", ["artifact://remote/input-1"]),
+            new RemoteCommandScope(
+                [RemoteCommandKind.SubmitMessage],
+                SideEffectLevel.ReadOnly,
+                threadRefs: ["thread-remote-001"]),
+            new RemoteCommandIdempotencyKey("idem-remote-001"),
+            new RemoteAuditContext("pairing-remote-001", "actor-remote-001", "network-remote-001"));
+
+        var result = await bridge.SubmitCommandAsync(command, CancellationToken.None);
+
+        Assert.Equal(RemoteCommandAdmissionStatus.Accepted, result.Status);
+        Assert.Equal("host-operation:remote-command-001", result.AcceptedOperationRef);
+        Assert.Equal("remote.submit_message", controlPlane.LastUnifiedOperationRequest?.OperationName);
+        Assert.Equal("thread-remote-001", controlPlane.LastUnifiedOperationRequest?.Subject?.ThreadId.Value);
+        Assert.Equal("session-remote-001", controlPlane.LastUnifiedOperationRequest?.Subject?.SessionId.Value);
+        Assert.True(controlPlane.LastUnifiedOperationRequest?.Governance?.RequiresHumanGate);
+        Assert.Equal(SideEffectLevel.ReadOnly, controlPlane.LastUnifiedOperationRequest?.Governance?.MaxSideEffectLevel);
+        Assert.Equal("remote-command:remote-command-001:message", controlPlane.LastUnifiedOperationRequest?.Payload.GetProperty("user_input_ref").GetString());
+        Assert.Equal("remote.command", controlPlane.LastUnifiedOperationRequest?.Metadata.Entries["source"].GetString());
+    }
+
+    [Fact]
+    public async Task RemoteContinuityHostGatewayBridge_MapsThreadSnapshotForMultipleHostConsumers()
+    {
+        var controlPlane = new FakeTianShuControlPlane();
+        var snapshotStore = new InMemoryProjectionSnapshotStore();
+        await snapshotStore.UpsertAsync(
+            new ProjectionSnapshotKey(ProjectionScopeKind.Thread, "thread-remote-host-001"),
+            CreateRemoteRuntimeThreadDelta("thread-remote-host-001", "远程宿主线程", @"C:\TianShu\workspace\runtime\active-run.json"),
+            CancellationToken.None);
+        IHostGateway gateway = new TianShuHostGateway(controlPlane, snapshotStore);
+
+        var hostIds = new[]
+        {
+            "cli",
+            "vssdk.sidecar",
+            "config-gui",
+            "apphost",
+        };
+
+        foreach (var hostId in hostIds)
+        {
+            var bridge = new RemoteContinuityHostGatewayBridge(gateway, hostId);
+
+            var snapshot = await bridge.GetSnapshotAsync(
+                new RemoteThreadSnapshotQuery(
+                    new ThreadId("thread-remote-host-001"),
+                    new DeviceId($"device-{hostId.Replace('.', '-')}"),
+                    $"token-ref-{hostId}"),
+                CancellationToken.None);
+
+            Assert.Equal($"snapshot:{hostId}:Thread:thread-remote-host-001", snapshot.SnapshotId);
+            Assert.Equal(RemoteRunLifecycle.Running, snapshot.RunState.Lifecycle);
+            Assert.Equal("turn-thread-remote-host-001", snapshot.RunState.ActiveTurnId?.Value);
+            Assert.Equal("[redacted:absolute_path]", snapshot.RunState.ActiveRunRef);
+            Assert.Contains("absolute_path", snapshot.Redaction.RedactedKinds);
+            Assert.Contains("trace://remote/thread-remote-host-001", snapshot.Diagnostics.RuntimeTraceRefs);
+            Assert.Equal("turn-log://remote/thread-remote-host-001", snapshot.Evidence.TurnLogRef);
+        }
+    }
+
+    [Fact]
+    public async Task RemoteContinuityHostGatewayBridge_SubscribeMapsHostViewUpdatesToRemoteEvents()
+    {
+        var controlPlane = new FakeTianShuControlPlane();
+        controlPlane.Subscriptions.ThreadEvents = new[]
+        {
+            new ControlPlaneProjectionEvent
+            {
+                Kind = "ProjectionDelta",
+                Timestamp = DateTimeOffset.UtcNow,
+                ThreadId = new ThreadId("thread-remote-events-001"),
+                Delta = CreateRemoteRuntimeThreadDelta(
+                    "thread-remote-events-001",
+                    "远程事件线程",
+                    @"C:\TianShu\workspace\runtime\event-run.json",
+                    "cursor-remote-events-001"),
+            },
+        };
+        var snapshotStore = new InMemoryProjectionSnapshotStore();
+        IHostGateway gateway = new TianShuHostGateway(controlPlane, snapshotStore);
+        var bridge = new RemoteContinuityHostGatewayBridge(gateway, "vssdk.sidecar");
+
+        var events = new List<RemoteContinuityEvent>();
+        await foreach (var @event in bridge.SubscribeAsync(
+                           new RemoteEventSubscriptionRequest(
+                               "remote-sub-vsix-001",
+                               new ThreadId("thread-remote-events-001"),
+                               RemoteEventTransportKind.StdioBridge,
+                               RemoteEventReplayMode.SnapshotThenEvents),
+                           CancellationToken.None))
+        {
+            events.Add(@event);
+        }
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(RemoteContinuityEventKind.SnapshotRequired, events[0].Kind);
+        Assert.Equal(RemoteContinuityEventKind.RunStateChanged, events[1].Kind);
+        Assert.Equal("cursor-remote-events-001", events[1].Cursor.Value);
+        Assert.True(events[1].Visibility.Redacted);
+        Assert.Contains("absolute_path", events[1].Visibility.RedactedKinds);
+        Assert.Equal("[redacted:absolute_path]", events[1].Payload?.GetProperty("activeRunRef").GetString());
+    }
+
+    [Fact]
+    public void RemoteCommandHostGatewayBridge_ShouldNotReferenceRuntimeWorkspaceOrStores()
+    {
+        var repoRoot = FindRepoRoot();
+        var bridgeSource = File.ReadAllText(Path.Combine(repoRoot, "src", "Core", "TianShu.HostGateway", "RemoteCommandHostGatewayBridge.cs"));
+        var forbiddenTokens = new[]
+        {
+            "TianShu.Execution.Runtime",
+            "TianShu.RuntimeComposition",
+            "StableKernelCore",
+            "RuntimeStep",
+            "StageGraph",
+            "WorkspaceResolver",
+            "KernelThreadStore",
+            "IProjectionRuntimeStores",
+            "File.Write",
+            "Directory.CreateDirectory",
+        };
+
+        var violations = forbiddenTokens
+            .Where(token => bridgeSource.Contains(token, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "远程命令桥只能进入 Host Gateway，不得直接引用 Runtime、workspace 或 store。"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void RemoteContinuityHostGatewayBridge_ShouldNotReferenceRuntimeWorkspaceStoresOrRemoteModuleImplementation()
+    {
+        var repoRoot = FindRepoRoot();
+        var bridgeSource = File.ReadAllText(Path.Combine(repoRoot, "src", "Core", "TianShu.HostGateway", "RemoteContinuityHostGatewayBridge.cs"));
+        var forbiddenTokens = new[]
+        {
+            "TianShu.Execution.Runtime",
+            "TianShu.RuntimeComposition",
+            "StableKernelCore",
+            "RuntimeStep",
+            "StageGraph",
+            "WorkspaceResolver",
+            "KernelThreadStore",
+            "IProjectionRuntimeStores",
+            "TianShu.Remote.Local",
+            "LocalRemoteContinuityModule",
+            "File.Write",
+            "Directory.CreateDirectory",
+        };
+
+        var violations = forbiddenTokens
+            .Where(token => bridgeSource.Contains(token, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "远程连续性 Host Gateway 桥只能消费 typed projection 和命令入口，不得引用 Runtime、store 或 Remote Module 实现。"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
     }
 
     [Fact]
@@ -2801,5 +2985,43 @@ public sealed class HostGatewayTests
                         AuditRefs: ["audit://thread-runtime-projection-001"],
                         DowngradeReasons: []))),
             new ProjectionCursor($"cursor-{threadId}"));
+    }
+
+    private static ProjectionDelta CreateRemoteRuntimeThreadDelta(
+        string threadId,
+        string title,
+        string activeRunRef,
+        string? cursor = null)
+    {
+        var collaboration = new CollaborationSpace(
+            new CollaborationSpaceId($"space-{threadId}"),
+            $"space-{threadId}",
+            "Remote Host",
+            new CollaborationSpaceProfile("remote-host"),
+            CollaborationDefaultSet.Empty);
+        return new ProjectionDelta(
+            new ThreadProjectionPayload(
+                new TianShu.Contracts.Projections.ThreadProjection(
+                    new ThreadId(threadId),
+                    title,
+                    CollaborationSpaceRef.From(collaboration),
+                    ActiveTurnId: new TurnId($"turn-{threadId}"),
+                    HasActiveTurn: true,
+                    RuntimeStatus: new ThreadRuntimeStatusProjection(
+                        "running",
+                        TurnStatus: "running",
+                        BackgroundStatus: "running",
+                        HasActiveRun: true,
+                        ActiveRunRef: activeRunRef,
+                        NotificationCode: "RemoteHostTurnStarted"),
+                    Diagnostics: new ThreadDiagnosticsProjection(
+                        RuntimeTraceRefs: [$"trace://remote/{threadId}"],
+                        DiagnosticsRefs: [$"diagnostics://remote/{threadId}"],
+                        MetricsEventIds: [$"metrics://remote/{threadId}"]),
+                    Evidence: new ThreadEvidenceProjection(
+                        TurnLogRef: $"turn-log://remote/{threadId}",
+                        RolloutRef: $"rollout://remote/{threadId}",
+                        AuditRefs: [$"audit://remote/{threadId}"]))),
+            new ProjectionCursor(cursor ?? $"cursor-{threadId}"));
     }
 }

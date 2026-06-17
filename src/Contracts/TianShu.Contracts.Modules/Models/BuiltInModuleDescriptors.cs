@@ -8,6 +8,8 @@ namespace TianShu.Contracts.Modules;
 /// </summary>
 public static class BuiltInModuleDescriptors
 {
+    private const string MinimumBuiltInTianShuVersion = "0.6.0";
+
     public static ModuleDescriptor MemoryIdentity(
         string moduleId = "memory.identity",
         ModuleTrustLevel trustLevel = ModuleTrustLevel.BuiltIn)
@@ -101,6 +103,20 @@ public static class BuiltInModuleDescriptors
             requiresHumanGate: false,
             reason: "Built-in module descriptor must still be invoked through Kernel-approved RuntimeStep.");
 
+        var configurationSchema = new ModuleSchemaRef(configurationSchemaId);
+        var requiredConfiguration = new ModuleConfigurationRequirement(
+            configurationSchemaId,
+            $"{displayName} configuration",
+            valueSchema: configurationSchema,
+            required: true,
+            secret: false);
+        var runtimeDependency = new ModuleRuntimeDependency(
+            implementationBinding.ProjectName,
+            implementationBinding.ProjectName,
+            ModuleRuntimeDependencyKind.DotNetAssembly,
+            required: true,
+            description: "Built-in module assembly must be present in the TianShu runtime package.");
+
         var capability = new ModuleCapabilityDescriptor(
             capabilityId,
             displayName,
@@ -115,11 +131,14 @@ public static class BuiltInModuleDescriptors
             displayName,
             version: "1.0",
             capabilities: [capability],
-            configurationSchema: new ModuleSchemaRef(configurationSchemaId),
+            configurationSchema: configurationSchema,
             permission: permission,
             sideEffects: sideEffects,
             audit: new ModuleAuditProfile(required: true, eventKinds: [$"{moduleId}.invoked"], redactSensitiveValues: true),
             trustLevel: trustLevel,
+            requiredConfiguration: [requiredConfiguration],
+            runtimeDependencies: [runtimeDependency],
+            minimumTianShuVersion: MinimumBuiltInTianShuVersion,
             health: new ModuleHealthProbe(ModuleHealthStatus.Unknown),
             implementationBinding: implementationBinding);
     }

@@ -887,9 +887,51 @@ function Test-SubAgentMechanismEvidence {
         -and [bool]$Evidence.moduleCapabilityStepObserved `
         -and [bool]$Evidence.subAgentBridgeObserved `
         -and [bool]$Evidence.parentSecondModelReceivedToolResult `
+        -and [bool]$Evidence.multiAgentFinalCaseObserved `
+        -and [bool]$Evidence.parallelFanoutObserved `
+        -and [bool]$Evidence.subtreeGovernanceObserved `
+        -and [bool]$Evidence.budgetSplitObserved `
+        -and [bool]$Evidence.fanInObserved `
+        -and [bool]$Evidence.failureIsolationObserved `
+        -and [bool]$Evidence.wholeTreeDiagnosticsObserved `
+        -and ([int]$Evidence.plannedSubTaskCount -ge 3) `
+        -and ([int]$Evidence.maxConcurrentAgents -ge 2) `
+        -and ([int]$Evidence.completedChildCount -ge 2) `
+        -and ([int]$Evidence.failedChildCount -ge 1) `
+        -and ([int]$Evidence.treeNodeCount -ge 4) `
+        -and ([int]$Evidence.treeEdgeCount -ge 3) `
         -and $EvidenceText.Contains('spawn_agent') `
         -and $EvidenceText.Contains('module.sub_agent') `
-        -and $EvidenceText.Contains('sub_agent.spawn')
+        -and $EvidenceText.Contains('sub_agent.spawn') `
+        -and $EvidenceText.Contains('subagent.fanout.diagnostics') `
+        -and $EvidenceText.Contains('subagent.fanin.summary') `
+        -and $EvidenceText.Contains('sub_agent.tree_diagnostics.v1')
+}
+
+function Test-RemoteContinuityMechanismEvidence {
+    param(
+        [object]$Evidence,
+        [string]$EvidenceText
+    )
+
+    $submittedKinds = @($Evidence.submittedCommandKinds)
+    $redactedKinds = @($Evidence.snapshotRedactedKinds)
+    return [bool]$Evidence.success `
+        -and [bool]$Evidence.activationAccepted `
+        -and ([int]$Evidence.readOnlyFollowerEventCount -gt 0) `
+        -and ($redactedKinds -contains 'absolute_path') `
+        -and [string]::Equals([string]$Evidence.cursorResumeReplayMode, 'FromCursor', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and [bool]$Evidence.snapshotRefreshRequired `
+        -and [string]::Equals([string]$Evidence.remoteApprovalStatus, 'Accepted', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and [string]::Equals([string]$Evidence.remoteInterruptStatus, 'Accepted', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and [string]::Equals([string]$Evidence.remoteResumeStatus, 'Accepted', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and [string]::Equals([string]$Evidence.remoteFollowUpStatus, 'Accepted', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and [string]::Equals([string]$Evidence.duplicateFollowUpStatus, 'DuplicateIgnored', [System.StringComparison]::OrdinalIgnoreCase) `
+        -and ($submittedKinds -contains 'SubmitMessage') `
+        -and ($submittedKinds -contains 'ApprovalDecision') `
+        -and ($submittedKinds -contains 'Interrupt') `
+        -and ($submittedKinds -contains 'Resume') `
+        -and $EvidenceText.Contains('deterministic-remote-continuity')
 }
 
 function Test-SubAgentLiveSpawnObserved {
@@ -925,6 +967,46 @@ function Test-SubAgentLiveSpawnObserved {
     }
 
     return $false
+}
+
+function Test-SubAgentLiveEffectiveSpawnObserved {
+    param(
+        [object]$Summary,
+        [string]$SummaryText,
+        [bool]$SpawnObserved
+    )
+
+    if (-not $SpawnObserved) {
+        return $false
+    }
+
+    $executionEvidence = @()
+    foreach ($propertyName in @('replaySummary', 'ReplaySummary', 'kernelRuntimeTerminalProjection', 'KernelRuntimeTerminalProjection', 'runtimeDiagnosticsProjection', 'RuntimeDiagnosticsProjection')) {
+        $value = TryGet-JsonPropertyValue -Object $Summary -PropertyName $propertyName
+        if ($null -ne $value) {
+            $executionEvidence += ($value | ConvertTo-Json -Depth 100 -Compress)
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SummaryText)) {
+        $executionEvidence += $SummaryText
+    }
+
+    $text = Join-NonEmptyText -Values $executionEvidence
+    $hasSpawnBridgeEvidence = $text -match '(?i)module\.sub_agent' -or
+        $text -match '(?i)sub_agent\.spawn' -or
+        $text -match '(?i)subagent_module_bridge'
+    $hasReturnEvidence = $text -match '(?i)toolResults' -or
+        $text -match '(?i)ToolResultProviderInputItem' -or
+        $text -match '(?i)subAgentFanInSummary' -or
+        $text -match '(?i)subAgentTreeDiagnostics' -or
+        $text -match '(?i)childRunId'
+    $hasCompletedEvidence = $text -match '(?i)RuntimeCompleted' -or
+        $text -match '(?i)"disposition"\s*:\s*"RuntimeCompleted"' -or
+        $text -match '(?i)"status"\s*:\s*"succeeded"' -or
+        $text -match '(?i)"status"\s*:\s*"Succeeded"'
+
+    return [bool]($hasSpawnBridgeEvidence -and $hasReturnEvidence -and $hasCompletedEvidence)
 }
 
 function Get-GeneratedWpfProjects {
@@ -1374,7 +1456,52 @@ function Invoke-SubAgentMechanismAcceptance {
         (Get-AbsolutePath -Path $outputPath),
         [System.Text.Encoding]::UTF8)
     $evidence = ConvertFrom-JsonCompat -Text $evidenceText
-    Assert-Condition (Test-SubAgentMechanismEvidence -Evidence $evidence -EvidenceText $evidenceText) "Sub-Agent 机制验收证据不完整，必须包含 spawn_agent、ModuleCapabilityStep、module.sub_agent/sub_agent.spawn、bridge 与 toolResults 回流。"
+    Assert-Condition (Test-SubAgentMechanismEvidence -Evidence $evidence -EvidenceText $evidenceText) "Sub-Agent 机制验收证据不完整，必须包含 spawn_agent、ModuleCapabilityStep、module.sub_agent/sub_agent.spawn、bridge、toolResults 回流，以及同一多 Agent 案例内的 fanout、子树治理、预算切分、fan-in、失败隔离与整树诊断。"
+
+    return [pscustomobject]@{
+        Accepted = $true
+        ProjectPath = $projectPath
+        Workdir = $workdir
+        EvidencePath = $outputPath
+        Evidence = $evidence
+    }
+}
+
+function Invoke-RemoteContinuityMechanismAcceptance {
+    param(
+        [string]$RepoRoot,
+        [string]$HarnessRootPath,
+        [bool]$SkipBuild
+    )
+
+    $projectPath = Join-Path $RepoRoot 'tools\acceptance\TianShu.RemoteContinuityAcceptance\TianShu.RemoteContinuityAcceptance.csproj'
+    $workdir = Join-Path $HarnessRootPath 'remote-continuity'
+    $outputPath = Join-Path $workdir 'evidence.json'
+    Assert-PathUnderRoot -Path $projectPath -Root $RepoRoot
+    Assert-PathUnderRoot -Path $workdir -Root $RepoRoot
+    Assert-PathUnderRoot -Path $outputPath -Root $RepoRoot
+    Assert-Condition (Test-Path -LiteralPath $projectPath) "Remote Continuity 机制验收项目不存在：$projectPath"
+    Ensure-Directory -Path $workdir -Root $RepoRoot
+
+    if (-not $SkipBuild) {
+        Write-Step "构建 Remote Continuity 机制验收 harness：$projectPath"
+        & dotnet build $projectPath --nologo --verbosity:minimal | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Remote Continuity 机制验收 harness 构建失败，退出码：$LASTEXITCODE"
+        }
+    }
+
+    Write-Step "执行 Remote Continuity 机制验收 harness：$projectPath"
+    & dotnet run --project $projectPath --no-build -- --workdir $workdir --output $outputPath | Out-Host
+    $exitCode = $LASTEXITCODE
+    Assert-Condition ($exitCode -eq 0) "Remote Continuity 机制验收 harness 失败，退出码：$exitCode"
+    Assert-Condition (Test-Path -LiteralPath $outputPath) "Remote Continuity 机制验收未生成 evidence.json：$outputPath"
+
+    $evidenceText = [System.IO.File]::ReadAllText(
+        (Get-AbsolutePath -Path $outputPath),
+        [System.Text.Encoding]::UTF8)
+    $evidence = ConvertFrom-JsonCompat -Text $evidenceText
+    Assert-Condition (Test-RemoteContinuityMechanismEvidence -Evidence $evidence -EvidenceText $evidenceText) "Remote Continuity 机制验收证据不完整，必须包含只读跟随、cursor resume、snapshot refresh、远程审批、interrupt/resume、follow-up 和幂等去重。"
 
     return [pscustomobject]@{
         Accepted = $true
@@ -1552,6 +1679,8 @@ function Invoke-SubAgentLiveAcceptanceRun {
 
     $summary = $null
     $spawnObserved = $false
+    $effectiveSpawnObserved = $false
+    $falsePositiveSpawnObserved = $false
     $providerToolSurface = [pscustomobject]@{
         Available = $false
         HasSpawnAgent = $false
@@ -1568,11 +1697,16 @@ function Invoke-SubAgentLiveAcceptanceRun {
         $providerToolSurface = Get-SubAgentLiveProviderToolSurface -Summary $summary
         $actualToolRequests = @(Get-SubAgentLiveActualToolRequestNames -Summary $summary -SummaryText $summaryText)
         $spawnObserved = Test-SubAgentLiveSpawnObserved -Summary $summary -SummaryText $summaryText
+        $effectiveSpawnObserved = Test-SubAgentLiveEffectiveSpawnObserved -Summary $summary -SummaryText $summaryText -SpawnObserved $spawnObserved
+        $falsePositiveSpawnObserved = [bool]($spawnObserved -and -not $effectiveSpawnObserved)
         if (-not [bool]$providerToolSurface.Available -or -not [bool]$providerToolSurface.HasSpawnAgent) {
             $conclusion = 'live-tool-surface-invalid'
         }
-        elseif ($spawnObserved) {
-            $conclusion = 'live-autonomous-spawn-observed'
+        elseif ($effectiveSpawnObserved) {
+            $conclusion = 'live-effective-autonomous-spawn-observed'
+        }
+        elseif ($falsePositiveSpawnObserved) {
+            $conclusion = 'live-spawn-signal-without-effective-return'
         }
         else {
             $conclusion = 'mechanism-ready-live-autonomous-spawn-not-observed'
@@ -1595,6 +1729,8 @@ function Invoke-SubAgentLiveAcceptanceRun {
         ProviderToolSurface = $providerToolSurface
         ActualToolRequests = $actualToolRequests
         SpawnObserved = [bool]$spawnObserved
+        EffectiveSpawnObserved = [bool]$effectiveSpawnObserved
+        FalsePositiveSpawnObserved = [bool]$falsePositiveSpawnObserved
         Conclusion = $conclusion
         RunRoot = $runRoot
         ArtifactsRoot = $liveArtifactsRoot
@@ -1657,7 +1793,17 @@ function Invoke-SubAgentLiveObservationMatrix {
         (-not [bool]$_.ProviderToolSurface.Available -or -not [bool]$_.ProviderToolSurface.HasSpawnAgent)
     }).Count
     $spawnObservedCount = @($resultArray | Where-Object { [bool]$_.SpawnObserved }).Count
+    $effectiveSpawnObservedCount = @($resultArray | Where-Object { [bool]$_.EffectiveSpawnObserved }).Count
+    $falsePositiveSpawnObservedCount = @($resultArray | Where-Object { [bool]$_.FalsePositiveSpawnObserved }).Count
     $matrixComplete = $resultArray.Count -eq $plannedRunCount
+    $overallTriggerRate = 0.0
+    $overallEffectiveRate = 0.0
+    $overallFalsePositiveRate = 0.0
+    if ($resultArray.Count -gt 0) {
+        $overallTriggerRate = [double]$spawnObservedCount / [double]$resultArray.Count
+        $overallEffectiveRate = [double]$effectiveSpawnObservedCount / [double]$resultArray.Count
+        $overallFalsePositiveRate = [double]$falsePositiveSpawnObservedCount / [double]$resultArray.Count
+    }
 
     $triggerRates = @(
         foreach ($scenario in @($Scenarios)) {
@@ -1668,9 +1814,15 @@ function Invoke-SubAgentLiveObservationMatrix {
                     [string]$_.ScenarioId -eq $scenarioId -and [string]$_.ModelCellId -eq $modelCellId
                 })
                 $cellSpawnCount = @($cellResults | Where-Object { [bool]$_.SpawnObserved }).Count
+                $cellEffectiveSpawnCount = @($cellResults | Where-Object { [bool]$_.EffectiveSpawnObserved }).Count
+                $cellFalsePositiveSpawnCount = @($cellResults | Where-Object { [bool]$_.FalsePositiveSpawnObserved }).Count
                 $triggerRate = 0.0
+                $effectiveRate = 0.0
+                $falsePositiveRate = 0.0
                 if ($cellResults.Count -gt 0) {
                     $triggerRate = [double]$cellSpawnCount / [double]$cellResults.Count
+                    $effectiveRate = [double]$cellEffectiveSpawnCount / [double]$cellResults.Count
+                    $falsePositiveRate = [double]$cellFalsePositiveSpawnCount / [double]$cellResults.Count
                 }
 
                 [pscustomobject]@{
@@ -1681,7 +1833,11 @@ function Invoke-SubAgentLiveObservationMatrix {
                     Protocol = [string]$modelCell.Protocol
                     Runs = $cellResults.Count
                     SpawnObserved = $cellSpawnCount
+                    EffectiveSpawnObserved = $cellEffectiveSpawnCount
+                    FalsePositiveSpawnObserved = $cellFalsePositiveSpawnCount
                     TriggerRate = $triggerRate
+                    EffectiveRate = $effectiveRate
+                    FalsePositiveRate = $falsePositiveRate
                 }
             }
         }
@@ -1694,8 +1850,11 @@ function Invoke-SubAgentLiveObservationMatrix {
     elseif ($failedRunCount -gt 0 -or $invalidToolSurfaceCount -gt 0) {
         $matrixConclusion = 'live-observation-matrix-invalid'
     }
-    elseif ($spawnObservedCount -gt 0) {
-        $matrixConclusion = 'live-observation-matrix-complete-with-autonomous-spawn-observed'
+    elseif ($effectiveSpawnObservedCount -gt 0) {
+        $matrixConclusion = 'live-observation-matrix-complete-with-effective-autonomous-spawn-observed'
+    }
+    elseif ($falsePositiveSpawnObservedCount -gt 0) {
+        $matrixConclusion = 'live-observation-matrix-complete-with-spawn-signal-without-effective-return'
     }
 
     return [pscustomobject]@{
@@ -1709,7 +1868,14 @@ function Invoke-SubAgentLiveObservationMatrix {
         FailedRunCount = $failedRunCount
         InvalidToolSurfaceCount = $invalidToolSurfaceCount
         SpawnObservedCount = $spawnObservedCount
+        EffectiveSpawnObservedCount = $effectiveSpawnObservedCount
+        FalsePositiveSpawnObservedCount = $falsePositiveSpawnObservedCount
         SpawnObservedAny = $spawnObservedCount -gt 0
+        EffectiveSpawnObservedAny = $effectiveSpawnObservedCount -gt 0
+        FalsePositiveSpawnObservedAny = $falsePositiveSpawnObservedCount -gt 0
+        OverallTriggerRate = $overallTriggerRate
+        OverallEffectiveRate = $overallEffectiveRate
+        OverallFalsePositiveRate = $overallFalsePositiveRate
         MatrixComplete = [bool]$matrixComplete
         TriggerRates = $triggerRates
         Results = $resultArray
@@ -2001,6 +2167,8 @@ if ($PrepareOnly) {
         TransientResumePrompt = $TransientResumePrompt
         SubAgentMechanismPlanned = $true
         SubAgentMechanismEvidencePath = Join-Path $HarnessRootPath 'subagent-mechanism\evidence.json'
+        RemoteContinuityMechanismPlanned = $true
+        RemoteContinuityMechanismEvidencePath = Join-Path $HarnessRootPath 'remote-continuity\evidence.json'
         SubAgentLivePlanned = $true
         SubAgentLiveObservationProtocol = 'fixed-task-by-fixed-model-by-fixed-runs'
         SubAgentLiveScenarioCount = @($subAgentLiveScenarios).Count
@@ -2021,6 +2189,7 @@ if ($PrepareOnly) {
 }
 
 $subAgentMechanism = Invoke-SubAgentMechanismAcceptance -RepoRoot $RepoRoot -HarnessRootPath $HarnessRootPath -SkipBuild ([bool]$SkipBuild)
+$remoteContinuityMechanism = Invoke-RemoteContinuityMechanismAcceptance -RepoRoot $RepoRoot -HarnessRootPath $HarnessRootPath -SkipBuild ([bool]$SkipBuild)
 
 $initialSession = Invoke-AcceptanceCliSession -SessionName 'initial' `
     -ScriptLines $initialSessionScriptLines `
@@ -2225,8 +2394,11 @@ if (-not [bool]$subAgentLive.MatrixComplete) {
 elseif ([int]$subAgentLive.FailedRunCount -gt 0 -or [int]$subAgentLive.InvalidToolSurfaceCount -gt 0) {
     Write-Step "Sub-Agent live 观察矩阵存在失败或工具面无效 run；最终结论只能保留机制门禁通过：failed=$($subAgentLive.FailedRunCount), invalidToolSurface=$($subAgentLive.InvalidToolSurfaceCount)"
 }
-elseif ($subAgentLive.SpawnObservedAny) {
-    Write-Step "Sub-Agent live 观察矩阵检测到真实 spawn_agent 证据：$($subAgentLive.SpawnObservedCount)/$($subAgentLive.PlannedRunCount)"
+elseif ($subAgentLive.EffectiveSpawnObservedAny) {
+    Write-Step "Sub-Agent live 观察矩阵检测到有效自主 spawn_agent 回流证据：effective=$($subAgentLive.EffectiveSpawnObservedCount)/$($subAgentLive.PlannedRunCount), trigger=$($subAgentLive.SpawnObservedCount)/$($subAgentLive.PlannedRunCount), falsePositive=$($subAgentLive.FalsePositiveSpawnObservedCount)"
+}
+elseif ($subAgentLive.FalsePositiveSpawnObservedAny) {
+    Write-Step "Sub-Agent live 观察矩阵仅检测到弱 spawn_agent 信号但缺少有效回流证据：trigger=$($subAgentLive.SpawnObservedCount)/$($subAgentLive.PlannedRunCount), falsePositive=$($subAgentLive.FalsePositiveSpawnObservedCount)"
 }
 else {
     Write-Step "Sub-Agent live 观察矩阵未检测到真实 spawn_agent：0/$($subAgentLive.PlannedRunCount)；机制门禁仍通过，但不得宣称模型自主 Sub-Agent 通过。"
@@ -2298,6 +2470,15 @@ Assert-Condition ([string]::Equals([string]$userCodexConfigHashBefore, [string]$
     SubagentEvidenceObserved = [bool]$subagentEvidenceObserved
     SubAgentMechanismEvidencePath = $subAgentMechanism.EvidencePath
     SubAgentMechanismAccepted = [bool]$subAgentMechanism.Accepted
+    SubAgentMultiAgentFinalCaseAccepted = [bool]$subAgentMechanism.Evidence.multiAgentFinalCaseObserved
+    SubAgentMechanismParallelFanoutObserved = [bool]$subAgentMechanism.Evidence.parallelFanoutObserved
+    SubAgentMechanismSubtreeGovernanceObserved = [bool]$subAgentMechanism.Evidence.subtreeGovernanceObserved
+    SubAgentMechanismBudgetSplitObserved = [bool]$subAgentMechanism.Evidence.budgetSplitObserved
+    SubAgentMechanismFanInObserved = [bool]$subAgentMechanism.Evidence.fanInObserved
+    SubAgentMechanismFailureIsolationObserved = [bool]$subAgentMechanism.Evidence.failureIsolationObserved
+    SubAgentMechanismWholeTreeDiagnosticsObserved = [bool]$subAgentMechanism.Evidence.wholeTreeDiagnosticsObserved
+    RemoteContinuityMechanismEvidencePath = $remoteContinuityMechanism.EvidencePath
+    RemoteContinuityMechanismAccepted = [bool]$remoteContinuityMechanism.Accepted
     SubAgentLiveAttempted = [bool]$subAgentLive.Attempted
     SubAgentLiveObservationProtocol = 'fixed-task-by-fixed-model-by-fixed-runs'
     SubAgentLiveScenarioCount = [int]$subAgentLive.PlannedScenarioCount
@@ -2310,6 +2491,13 @@ Assert-Condition ([string]::Equals([string]$userCodexConfigHashBefore, [string]$
     SubAgentLiveInvalidToolSurfaceCount = [int]$subAgentLive.InvalidToolSurfaceCount
     SubAgentLiveSpawnObserved = [bool]$subAgentLive.SpawnObservedAny
     SubAgentLiveSpawnObservedCount = [int]$subAgentLive.SpawnObservedCount
+    SubAgentLiveEffectiveSpawnObserved = [bool]$subAgentLive.EffectiveSpawnObservedAny
+    SubAgentLiveEffectiveSpawnObservedCount = [int]$subAgentLive.EffectiveSpawnObservedCount
+    SubAgentLiveFalsePositiveSpawnObserved = [bool]$subAgentLive.FalsePositiveSpawnObservedAny
+    SubAgentLiveFalsePositiveSpawnObservedCount = [int]$subAgentLive.FalsePositiveSpawnObservedCount
+    SubAgentLiveOverallTriggerRate = [double]$subAgentLive.OverallTriggerRate
+    SubAgentLiveOverallEffectiveRate = [double]$subAgentLive.OverallEffectiveRate
+    SubAgentLiveOverallFalsePositiveRate = [double]$subAgentLive.OverallFalsePositiveRate
     SubAgentLiveConclusion = [string]$subAgentLive.Conclusion
     SubAgentLiveArtifactsRoot = [string]$subAgentLive.ArtifactsRoot
     SubAgentLiveTriggerRates = $subAgentLive.TriggerRates

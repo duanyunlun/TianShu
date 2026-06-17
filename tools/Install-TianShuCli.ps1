@@ -867,13 +867,13 @@ $defaultModelRouteSetTemplateContent = @'
 display_name = "Default Model Route Set"
 description = "TianShu route-set-first model routing template for non-Google live protocols."
 routes = [
-  { kind = "default", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "responses" }] },
-  { kind = "planning", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "responses" }] },
-  { kind = "coding", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "responses" }] },
+  { kind = "default", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "openai_responses" }] },
+  { kind = "planning", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "openai_responses" }] },
+  { kind = "coding", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "openai_responses" }] },
   { kind = "review", candidates = [{ provider = "anthropic", model = "claude-opus-4.8", protocol = "anthropic_messages" }] },
   { kind = "summarization", candidates = [{ provider = "openai-compatible", model = "openai-compatible-default", protocol = "openai_chat_completions" }] },
   { kind = "memory_extraction", candidates = [{ provider = "openai-compatible", model = "openai-compatible-default", protocol = "openai_chat_completions" }] },
-  { kind = "long_context", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "responses" }] },
+  { kind = "long_context", candidates = [{ provider = "openai", model = "gpt-5.5", protocol = "openai_responses" }] },
   { kind = "fast", candidates = [{ provider = "openai-compatible", model = "openai-compatible-default", protocol = "openai_chat_completions" }] },
 ]
 '@
@@ -1017,6 +1017,12 @@ foreach ($directory in $directories) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
+Set-Content -LiteralPath (Join-Path $tianShuHomeFullPath "VERSION.txt") -Encoding UTF8 -Value @(
+    "version=local-install"
+    "runtimeIdentifier=$RuntimeIdentifier"
+    "layout=portable-tianshu-home"
+)
+
 Copy-LegacyDirectoryToModulePath -LegacyDirectory $legacyToolsDirectory -TargetDirectory $toolsDirectory -Label "tools -> modules/tools/packages"
 Copy-LegacyDirectoryToModulePath -LegacyDirectory $legacyCasedToolsDirectory -TargetDirectory $toolsDirectory -Label "Tools -> modules/tools/packages"
 Copy-LegacyDirectoryToModulePath -LegacyDirectory $legacyProvidersDirectory -TargetDirectory $providersDirectory -Label "providers -> modules/model/provider-adapters"
@@ -1096,7 +1102,7 @@ Ensure-DefaultModuleTemplate `
     -Content $defaultModelRouteSetTemplateContent `
     -Label "默认模型路由方案模板" `
     -GeneratedMarkers @("[model_route_sets.default]", "TianShu route-set-first model routing template") `
-    -RequiredMarkers @("openai", "gpt-5.5", "responses", "anthropic", "claude-opus-4.8", "anthropic_messages", "openai-compatible", "openai-compatible-default", "openai_chat_completions") `
+    -RequiredMarkers @("openai", "gpt-5.5", "openai_responses", "anthropic", "claude-opus-4.8", "anthropic_messages", "openai-compatible", "openai-compatible-default", "openai_chat_completions") `
     -StaleMarkers @("protocol = `"auto`"", "google_generative")
 
 Ensure-DefaultModuleTemplate `

@@ -67,7 +67,7 @@ public sealed class SubAgentOrchestrationModule : ISubAgentModule
                         runId,
                         childGovernance,
                         context.WorkingDirectory,
-                        CreateRuntimeContextMetadata(request, childLineage, context)),
+                        CreateRuntimeContextMetadata(request, childLineage, childGovernance, context)),
                     ExecuteRuntimePlan: true),
                 cancellationToken)
             .ConfigureAwait(false);
@@ -80,7 +80,8 @@ public sealed class SubAgentOrchestrationModule : ISubAgentModule
             ResolveAssistantText(result),
             result.RuntimeTraceRef ?? result.KernelTraceId?.Value,
             ResolveDiagnosticsRefs(result),
-            ResolveFailure(result));
+            ResolveFailure(result),
+            ResolveArtifactRefs(result));
     }
 
     private static ExecutionFailure? ValidateLineage(
@@ -141,15 +142,65 @@ public sealed class SubAgentOrchestrationModule : ISubAgentModule
     private static MetadataBag CreateRuntimeContextMetadata(
         SubAgentSpawnRequest request,
         SubAgentLineage childLineage,
+        GovernanceEnvelope childGovernance,
         SubAgentModuleInvocationContext parentContext)
-        => new(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+    {
+        var entries = new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
         {
             ["subAgent.spawnCallId"] = StructuredValue.FromString(request.SpawnCallId),
             ["subAgent.parentRunId"] = StructuredValue.FromString(request.ParentLineage.CurrentRunId),
             ["subAgent.childRunId"] = StructuredValue.FromString(childLineage.CurrentRunId),
             ["subAgent.parentExecutionId"] = StructuredValue.FromString(parentContext.ExecutionId),
             ["subAgent.parentRuntimeStepId"] = StructuredValue.FromString(parentContext.RuntimeStepId),
-        });
+            ["subAgent.parentGovernance"] = StructuredValue.FromPlainObject(CreateGovernancePlainObject(parentContext.Governance)),
+            ["subAgent.childGovernance"] = StructuredValue.FromPlainObject(CreateGovernancePlainObject(childGovernance)),
+            ["subAgent.childBudget"] = StructuredValue.FromPlainObject(CreateBudgetPlainObject(request.RequestedBudget)),
+            ["subAgent.parentPermissionRequiresHumanGate"] = StructuredValue.FromBoolean(parentContext.Permission.RequiresHumanGate),
+            ["subAgent.parentSideEffectLevel"] = StructuredValue.FromString(parentContext.SideEffect.Level.ToString()),
+        };
+
+        CopyParentMetadata(parentContext.Metadata, entries, "subAgent.parentTracePolicy");
+        CopyParentMetadata(parentContext.Metadata, entries, "subAgent.parentRuntimeStepBudget");
+        CopyParentMetadata(parentContext.Metadata, entries, "subAgent.parentPermission");
+        CopyParentMetadata(parentContext.Metadata, entries, "subAgent.parentSideEffect");
+        if (!string.IsNullOrWhiteSpace(parentContext.WorkingDirectory))
+        {
+            entries["subAgent.parentWorkingDirectory"] = StructuredValue.FromString(parentContext.WorkingDirectory!);
+        }
+
+        return new MetadataBag(entries);
+    }
+
+    private static void CopyParentMetadata(MetadataBag metadata, IDictionary<string, StructuredValue> target, string key)
+    {
+        if (metadata.TryGetValue(key, out var value))
+        {
+            target[key] = value;
+        }
+    }
+
+    private static Dictionary<string, object?> CreateGovernancePlainObject(GovernanceEnvelope governance)
+        => new(StringComparer.Ordinal)
+        {
+            ["envelopeId"] = governance.EnvelopeId,
+            ["policyIds"] = governance.PolicyIds,
+            ["allowedToolIds"] = governance.AllowedToolIds,
+            ["allowedModuleIds"] = governance.AllowedModuleIds,
+            ["maxSideEffectLevel"] = governance.MaxSideEffectLevel.ToString(),
+            ["requiresHumanGate"] = governance.RequiresHumanGate,
+            ["approvalIds"] = governance.ApprovalIds.Select(static approval => approval.Value).ToArray(),
+            ["auditRecordIds"] = governance.AuditRecordIds.Select(static audit => audit.Value).ToArray(),
+        };
+
+    private static Dictionary<string, object?> CreateBudgetPlainObject(KernelBudget budget)
+        => new(StringComparer.Ordinal)
+        {
+            ["tokenBudget"] = budget.TokenBudget,
+            ["timeBudgetMs"] = budget.TimeBudgetMs,
+            ["costBudget"] = budget.CostBudget,
+            ["retryBudget"] = budget.RetryBudget,
+            ["toolCallBudget"] = budget.ToolCallBudget,
+        };
 
     private static SubAgentRunResult CreateBlockedResult(
         SubAgentSpawnRequest request,
@@ -185,6 +236,30 @@ public sealed class SubAgentOrchestrationModule : ISubAgentModule
             .Select(static value => value!)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+
+    private static IReadOnlyList<string> ResolveArtifactRefs(KernelRuntimeExecutionResult result)
+        => result.RuntimeResult?.StepResults
+            .SelectMany(static step => ReadStringArray(step.Output, "artifactRefs").Concat(ReadStringArray(step.Output, "artifacts")))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray()
+           ?? Array.Empty<string>();
+
+    private static IReadOnlyList<string> ReadStringArray(StructuredValue? output, string propertyName)
+    {
+        if (output is null
+            || !output.TryGetProperty(propertyName, out var value)
+            || value is not { Kind: StructuredValueKind.Array })
+        {
+            return Array.Empty<string>();
+        }
+
+        return value.Items
+            .Select(static item => item.Kind is StructuredValueKind.String or StructuredValueKind.Number ? item.GetString() : null)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Select(static item => item!)
+            .ToArray();
+    }
 
     private static SubAgentFailure? ResolveFailure(KernelRuntimeExecutionResult result)
     {

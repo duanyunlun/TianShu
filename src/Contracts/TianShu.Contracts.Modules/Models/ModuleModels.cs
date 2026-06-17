@@ -69,6 +69,92 @@ public sealed record ModuleSchemaRef
 }
 
 /// <summary>
+/// Module 配置项要求。
+/// Module configuration requirement.
+/// </summary>
+public sealed record ModuleConfigurationRequirement
+{
+    public ModuleConfigurationRequirement(
+        string key,
+        string displayName,
+        ModuleSchemaRef? valueSchema = null,
+        bool required = true,
+        bool secret = false,
+        string? description = null)
+    {
+        Key = IdentifierGuard.AgainstNullOrWhiteSpace(key, nameof(key));
+        DisplayName = IdentifierGuard.AgainstNullOrWhiteSpace(displayName, nameof(displayName));
+        ValueSchema = valueSchema;
+        Required = required;
+        Secret = secret;
+        Description = description;
+    }
+
+    public string Key { get; }
+
+    public string DisplayName { get; }
+
+    public ModuleSchemaRef? ValueSchema { get; }
+
+    public bool Required { get; }
+
+    public bool Secret { get; }
+
+    public string? Description { get; }
+}
+
+/// <summary>
+/// Module 运行时依赖类型。
+/// Module runtime dependency kind.
+/// </summary>
+public enum ModuleRuntimeDependencyKind
+{
+    Unspecified = 0,
+    DotNetAssembly = 1,
+    NativeCommand = 2,
+    EnvironmentVariable = 3,
+    NetworkEndpoint = 4,
+    Package = 5,
+    Service = 6,
+    Custom = 100,
+}
+
+/// <summary>
+/// Module 运行时依赖声明。
+/// Module runtime dependency declaration.
+/// </summary>
+public sealed record ModuleRuntimeDependency
+{
+    public ModuleRuntimeDependency(
+        string dependencyId,
+        string displayName,
+        ModuleRuntimeDependencyKind kind = ModuleRuntimeDependencyKind.Custom,
+        string? versionRange = null,
+        bool required = true,
+        string? description = null)
+    {
+        DependencyId = IdentifierGuard.AgainstNullOrWhiteSpace(dependencyId, nameof(dependencyId));
+        DisplayName = IdentifierGuard.AgainstNullOrWhiteSpace(displayName, nameof(displayName));
+        Kind = kind;
+        VersionRange = versionRange;
+        Required = required;
+        Description = description;
+    }
+
+    public string DependencyId { get; }
+
+    public string DisplayName { get; }
+
+    public ModuleRuntimeDependencyKind Kind { get; }
+
+    public string? VersionRange { get; }
+
+    public bool Required { get; }
+
+    public string? Description { get; }
+}
+
+/// <summary>
 /// Module 审计画像。
 /// Module audit profile.
 /// </summary>
@@ -182,6 +268,9 @@ public sealed record ModuleDescriptor
         SideEffectProfile? sideEffects = null,
         ModuleAuditProfile? audit = null,
         ModuleTrustLevel trustLevel = ModuleTrustLevel.Unspecified,
+        IReadOnlyList<ModuleConfigurationRequirement>? requiredConfiguration = null,
+        IReadOnlyList<ModuleRuntimeDependency>? runtimeDependencies = null,
+        string minimumTianShuVersion = "0.0.0",
         ModuleHealthProbe? health = null,
         ModuleImplementationBinding? implementationBinding = null,
         MetadataBag? metadata = null)
@@ -196,6 +285,9 @@ public sealed record ModuleDescriptor
         SideEffects = sideEffects ?? new SideEffectProfile(SideEffectLevel.Unspecified);
         Audit = audit ?? new ModuleAuditProfile(eventKinds: [$"module.{ModuleCapabilityDescriptor.NormalizePolicyToken(moduleId)}.invoked"]);
         TrustLevel = trustLevel;
+        RequiredConfiguration = requiredConfiguration ?? Array.Empty<ModuleConfigurationRequirement>();
+        RuntimeDependencies = runtimeDependencies ?? Array.Empty<ModuleRuntimeDependency>();
+        MinimumTianShuVersion = IdentifierGuard.AgainstNullOrWhiteSpace(minimumTianShuVersion, nameof(minimumTianShuVersion));
         Health = health ?? new ModuleHealthProbe(ModuleHealthStatus.Unknown);
         ImplementationBinding = implementationBinding;
         Metadata = metadata ?? MetadataBag.Empty;
@@ -220,6 +312,12 @@ public sealed record ModuleDescriptor
     public ModuleAuditProfile Audit { get; }
 
     public ModuleTrustLevel TrustLevel { get; }
+
+    public IReadOnlyList<ModuleConfigurationRequirement> RequiredConfiguration { get; }
+
+    public IReadOnlyList<ModuleRuntimeDependency> RuntimeDependencies { get; }
+
+    public string MinimumTianShuVersion { get; }
 
     public ModuleHealthProbe Health { get; }
 

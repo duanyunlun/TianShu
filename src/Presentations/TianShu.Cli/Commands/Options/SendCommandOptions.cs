@@ -1,4 +1,5 @@
 using TianShu.AppHost.Configuration;
+using TianShu.Contracts.Configuration;
 using TianShu.Execution.Runtime;
 using TianShu.Contracts.Conversations;
 using TianShu.Contracts.Governance;
@@ -38,7 +39,12 @@ internal sealed class SendCommandOptions
 
     public IReadOnlyList<ControlPlaneDynamicToolSpec>? DynamicTools { get; init; }
 
-    public string ArtifactsRoot { get; init; } = Path.Combine(Environment.CurrentDirectory, ".tianshu-cli", "runs");
+    public string ArtifactsRoot { get; init; } = TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePath(
+        "runs",
+        Environment.CurrentDirectory,
+        "send");
+
+    public bool ArtifactsRootExplicit { get; init; }
 
     public int TurnTimeoutSeconds { get; init; } = 300;
 
@@ -49,6 +55,12 @@ internal sealed class SendCommandOptions
     public bool KernelRuntimeLoop { get; init; }
 
     public bool EnableSubAgents { get; init; }
+
+    public bool EnableShell { get; init; }
+
+    public bool EnableMcp { get; init; }
+
+    public bool EnableMemory { get; init; }
 
     public static SendCommandParseResult Parse(string[] args)
     {
@@ -78,6 +90,9 @@ internal sealed class SendCommandOptions
         var approveAll = false;
         var kernelRuntimeLoop = false;
         var enableSubAgents = false;
+        var enableShell = false;
+        var enableMcp = false;
+        var enableMemory = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -127,6 +142,24 @@ internal sealed class SendCommandOptions
             if (string.Equals(arg, "--enable-subagents", StringComparison.OrdinalIgnoreCase))
             {
                 enableSubAgents = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--enable-shell", StringComparison.OrdinalIgnoreCase))
+            {
+                enableShell = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--enable-mcp", StringComparison.OrdinalIgnoreCase))
+            {
+                enableMcp = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--enable-memory", StringComparison.OrdinalIgnoreCase))
+            {
+                enableMemory = true;
                 continue;
             }
 
@@ -265,13 +298,25 @@ internal sealed class SendCommandOptions
             return SendCommandParseResult.Failure("--enable-subagents 需要同时启用 --approve-all，作为本轮 sub-agent HostMutation 授权边界。");
         }
 
+        if (enableShell && !approveAll)
+        {
+            return SendCommandParseResult.Failure("--enable-shell 需要同时启用 --approve-all，作为本轮 shell HostMutation 授权边界。");
+        }
+
+        var normalizedWorkingDirectory = NormalizePath(workingDirectory) ?? Environment.CurrentDirectory;
+        var normalizedConfigPath = NormalizePath(configFilePath) ?? RuntimeConfigurationComposition.ResolveDefaultPath();
+        var defaultArtifactsRoot = TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(
+            CliRuntimeWriteGuard.ResolveTianShuHomeFromConfig(normalizedConfigPath),
+            "runs",
+            normalizedWorkingDirectory,
+            "send");
         return SendCommandParseResult.Success(
             new SendCommandOptions
             {
                 Message = message.Trim(),
-                WorkingDirectory = NormalizePath(workingDirectory) ?? Environment.CurrentDirectory,
+                WorkingDirectory = normalizedWorkingDirectory,
                 AppHostProjectPath = Normalize(appHostProjectPath),
-                ConfigFilePath = NormalizePath(configFilePath) ?? RuntimeConfigurationComposition.ResolveDefaultPath(),
+                ConfigFilePath = normalizedConfigPath,
                 ProfileName = Normalize(profileName),
                 ConfigOverrides = configOverrides.Count == 0
                     ? null
@@ -285,12 +330,17 @@ internal sealed class SendCommandOptions
                 UserInputJsonPath = NormalizePath(userInputJsonPath),
                 CollaborationMode = Normalize(collaborationMode),
                 DynamicTools = dynamicTools,
-                ArtifactsRoot = NormalizePath(artifactsRoot) ?? Path.Combine(Environment.CurrentDirectory, ".tianshu-cli", "runs"),
+                ArtifactsRoot = NormalizePath(artifactsRoot)
+                    ?? defaultArtifactsRoot,
+                ArtifactsRootExplicit = !string.IsNullOrWhiteSpace(artifactsRoot),
                 TurnTimeoutSeconds = turnTimeoutSeconds ?? 300,
                 OutputJson = outputJson,
                 VerboseEvents = verboseEvents,
                 KernelRuntimeLoop = kernelRuntimeLoop,
                 EnableSubAgents = enableSubAgents,
+                EnableShell = enableShell,
+                EnableMcp = enableMcp,
+                EnableMemory = enableMemory,
             });
     }
 
@@ -321,12 +371,15 @@ internal sealed class SendCommandOptions
                 "  --collaboration-mode <mode>  可选，透传到 runtime turn/start 的 collaborationMode.mode",
                 "  --dynamic-tools-json <json>  可选，传入 dynamic tools JSON 数组",
                 "  --dynamic-tools-file <path>  可选，从文件读取 dynamic tools JSON 数组",
-                "  --artifacts <path>           可选，产物输出根目录",
+                "  --artifacts <path>           可选，显式产物输出根目录；默认写入 TianShuHome/runtime/runs/<workspace-key>/send",
                 "  --turn-timeout-seconds <n>   可选，等待回合完成的超时时间（秒），默认 300",
                 "  --json                       可选，以 JSON 输出摘要",
                 "  --verbose-events             可选，实时打印事件流",
                 "  --kernel-runtime-loop         可选，显式使用新 Kernel→Runtime 反应式 loop 验证入口",
                 "  --enable-subagents           可选，配合 --approve-all 显式开放模型自主 spawn_agent / module.sub_agent",
+                "  --enable-shell               可选，配合 --approve-all 显式开放 shell_command",
+                "  --enable-mcp                 可选，显式开放 MCP resource/tool 工具面",
+                "  --enable-memory              可选，显式开放 memory_search 与 memory.identity 模块能力",
                 "  --help                       显示帮助",
             ]);
 

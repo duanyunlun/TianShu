@@ -259,6 +259,109 @@ public sealed class MemoryContractTests
     }
 
     [Fact]
+    public void MemoryModuleAccessValidator_ShouldCreateAccessDescriptorWhenManifestGovernanceAndContextPolicyAlign()
+    {
+        var manifest = MemoryAccessManifest();
+        var governance = MemoryGovernance();
+        var contextPolicy = ApprovedMemoryContextPolicy();
+
+        var result = MemoryModuleAccessValidator.Validate(manifest, governance, contextPolicy);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
+        Assert.NotNull(result.Access);
+        Assert.Equal("memory.identity", result.Access!.Manifest.ModuleId);
+        Assert.Equal("context.memory", result.Access.ContextPolicy.Policy.PolicyId);
+        Assert.Contains(result.Access.Manifest.Capabilities, static capability => capability.Kind == MemoryModuleCapabilityKind.CompressReserved);
+    }
+
+    [Fact]
+    public void MemoryModuleAccessValidator_ShouldFailClosedWhenContextPolicyDisallowsMemoryRecord()
+    {
+        var contextPolicy = ApprovedMemoryContextPolicy(
+            new ContextPolicy(
+                policyId: "context.no-memory",
+                allowedSourceKinds: [nameof(ContextSourceKind.ToolEvidence)],
+                sourceRules:
+                [
+                    new ContextSourceRule(ContextSourceKind.ToolEvidence),
+                ]));
+
+        var result = MemoryModuleAccessValidator.Validate(MemoryAccessManifest(), MemoryGovernance(), contextPolicy);
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Access);
+        Assert.Contains(result.Issues, static issue => issue.Code == "memory_access.context_policy_disallows_memory");
+    }
+
+    [Fact]
+    public void MemoryModuleAccessValidator_ShouldFailClosedWhenProviderCapabilityIsMissing()
+    {
+        var provider = MemoryProvider(MemoryProviderCapability.Filter | MemoryProviderCapability.ReadOnlyAccess);
+        var manifest = MemoryAccessManifest(providers: [provider]);
+
+        var result = MemoryModuleAccessValidator.Validate(manifest, MemoryGovernance(), ApprovedMemoryContextPolicy());
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, static issue => issue.Code == "memory_access.provider_capability_missing");
+    }
+
+    [Fact]
+    public void MemoryModuleAccessValidator_ShouldFailClosedWhenCompressionReservationBecomesExecutable()
+    {
+        var manifest = MemoryAccessManifest(
+            capabilities:
+            [
+                RetrieveCapability(),
+                FormCapability(),
+                SupersedeCapability(),
+                new MemoryModuleCapabilityBinding(
+                    "memory.compress",
+                    MemoryModuleCapabilityKind.CompressReserved,
+                    "local",
+                    MemoryProviderCapability.None,
+                    new PermissionEnvelope(["memory.compress"], requiresHumanGate: true),
+                    new SideEffectProfile(SideEffectLevel.ReadOnly, ["memory"], reversible: true),
+                    requiresHumanGate: true,
+                    executable: true),
+            ],
+            compressionReservations:
+            [
+                new MemoryCompressionReservation("memory.compress.v1", "Reserved compression interface."),
+            ]);
+
+        var result = MemoryModuleAccessValidator.Validate(manifest, MemoryGovernance(), ApprovedMemoryContextPolicy());
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, static issue => issue.Code == "memory_access.compression_reserved_executable");
+    }
+
+    [Fact]
+    public void MemoryModuleAccessValidator_ShouldProjectMemoryRecordsToContextCandidatesWithoutSlicing()
+    {
+        var source = new MemorySourceRef(MemorySourceKind.ToolResult, "tool-call-1", snippet: "validated evidence");
+        var record = new FactMemoryRecord(
+            "preference.language",
+            StructuredValue.FromString("zh-CN"),
+            new MemorySpaceId("memory:user:semi"),
+            confidence: 0.83m,
+            id: new MemoryRecordId("memory-record:language"),
+            sources: [source]);
+        var queryResult = new MemoryQueryResult([record]);
+        var projection = MemoryModuleAccessValidator.ProjectRecordsToContextCandidates(
+            queryResult,
+            ApprovedMemoryContextPolicy());
+
+        var candidate = Assert.Single(projection.Candidates);
+        Assert.Equal(ContextSourceKind.MemoryRecord, candidate.SourceKind);
+        Assert.Equal("memory:memory-record:language", candidate.SegmentId);
+        Assert.Equal("memory-source:ToolResult:tool-call-1", candidate.EvidenceRef);
+        Assert.Equal(0.83m, candidate.Confidence);
+        Assert.Contains("preference.language", candidate.Content, StringComparison.Ordinal);
+        Assert.Equal("context.memory", projection.PolicyId);
+    }
+
+    [Fact]
     public void MemoryAdvancedContracts_ShouldRepresentSearchCapabilitiesAndOverlayExplainability()
     {
         var memorySpaceId = new MemorySpaceId("memory:workspace:tianshu");
@@ -446,4 +549,109 @@ public sealed class MemoryContractTests
         var serialized = JsonSerializer.Serialize(ingestionDecision);
         Assert.Contains(nameof(MemoryIngestionDecision.ReasonCodes), serialized, StringComparison.Ordinal);
     }
+
+    private static MemoryModuleManifest MemoryAccessManifest(
+        IReadOnlyList<MemoryProviderDescriptor>? providers = null,
+        IReadOnlyList<MemoryModuleCapabilityBinding>? capabilities = null,
+        IReadOnlyList<MemoryCompressionReservation>? compressionReservations = null)
+        => new(
+            "memory.identity",
+            "Identity Memory",
+            "1.0.0",
+            "0.6.0",
+            providers ?? [MemoryProvider()],
+            capabilities ?? [RetrieveCapability(), FormCapability(), SupersedeCapability(), CompressionCapability()],
+            new MemoryContextPolicyBinding(
+                ContextSourceKind.MemoryRecord,
+                ContextProjectionMode.ReferenceOnly,
+                requireEvidenceRefs: true,
+                moduleMaySliceContext: false),
+            compressionReservations ?? [new MemoryCompressionReservation("memory.compress.v1", "Reserved compression interface.")],
+            diagnostics: ["memory.access"]);
+
+    private static MemoryProviderDescriptor MemoryProvider(
+        MemoryProviderCapability capabilities =
+            MemoryProviderCapability.Filter
+            | MemoryProviderCapability.ReadOnlyAccess
+            | MemoryProviderCapability.Add
+            | MemoryProviderCapability.Extract
+            | MemoryProviderCapability.Supersede
+            | MemoryProviderCapability.ReadWriteAccess)
+        => new(
+            "local",
+            "Local Memory",
+            "1.0",
+            capabilities,
+            [MemoryScopeKind.User, MemoryScopeKind.Workspace],
+            TrustLevel: MemoryProviderTrustLevel.BuiltIn,
+            SupportedLifecycleStatuses: [MemoryLifecycleStatus.Active, MemoryLifecycleStatus.PendingReview, MemoryLifecycleStatus.Forgotten],
+            DegradationStrategy: MemoryProviderDegradationStrategy.UnsupportedResult,
+            Features: MemoryProviderFeature.SourceTracking | MemoryProviderFeature.SecretRedaction);
+
+    private static MemoryModuleCapabilityBinding RetrieveCapability()
+        => new(
+            "memory.retrieve",
+            MemoryModuleCapabilityKind.Retrieve,
+            "local",
+            MemoryProviderCapability.Filter | MemoryProviderCapability.ReadOnlyAccess,
+            new PermissionEnvelope(["memory.retrieve"], requiresHumanGate: false),
+            new SideEffectProfile(SideEffectLevel.ReadOnly, ["memory"], reversible: true),
+            requiresHumanGate: false);
+
+    private static MemoryModuleCapabilityBinding FormCapability()
+        => new(
+            "memory.form",
+            MemoryModuleCapabilityKind.Form,
+            "local",
+            MemoryProviderCapability.Add | MemoryProviderCapability.Extract,
+            new PermissionEnvelope(["memory.form"], requiresHumanGate: true),
+            new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false),
+            requiresHumanGate: true);
+
+    private static MemoryModuleCapabilityBinding SupersedeCapability()
+        => new(
+            "memory.supersede",
+            MemoryModuleCapabilityKind.Supersede,
+            "local",
+            MemoryProviderCapability.Supersede,
+            new PermissionEnvelope(["memory.supersede"], requiresHumanGate: true),
+            new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false),
+            requiresHumanGate: true);
+
+    private static MemoryModuleCapabilityBinding CompressionCapability()
+        => new(
+            "memory.compress",
+            MemoryModuleCapabilityKind.CompressReserved,
+            "local",
+            MemoryProviderCapability.None,
+            new PermissionEnvelope(["memory.compress"], requiresHumanGate: true),
+            new SideEffectProfile(SideEffectLevel.ReadOnly, ["memory"], reversible: true),
+            requiresHumanGate: true,
+            executable: false);
+
+    private static GovernanceEnvelope MemoryGovernance()
+        => new(
+            "memory-governance",
+            allowedModuleIds: ["memory.identity"],
+            maxSideEffectLevel: SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true);
+
+    private static ApprovedContextPolicy ApprovedMemoryContextPolicy(ContextPolicy? policy = null)
+        => new(
+            policy ?? new ContextPolicy(
+                policyId: "context.memory",
+                allowedSourceKinds: [nameof(ContextSourceKind.MemoryRecord)],
+                requireEvidenceRefs: true,
+                sourceRules:
+                [
+                    new ContextSourceRule(
+                        ContextSourceKind.MemoryRecord,
+                        priority: 40,
+                        projectionMode: ContextProjectionMode.ReferenceOnly,
+                        requireEvidenceRef: true),
+                ]),
+            new CoreIntentId("intent-memory"),
+            new StageGraphId("graph-memory"),
+            new StageId("stage-memory"),
+            new KernelOperationId("operation-memory"));
 }

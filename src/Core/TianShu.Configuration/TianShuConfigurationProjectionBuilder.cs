@@ -228,11 +228,18 @@ public sealed class TianShuConfigurationProjectionBuilder
             || IsSensitiveKey(key) && !IsSecretReferenceKey(key) && !IsTokenBudgetKey(field, key);
 
     private static bool IsSensitiveKey(string key)
-        => key.Contains("api_key", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("token", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("password", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("authorization", StringComparison.OrdinalIgnoreCase);
+    {
+        var normalized = key
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal);
+        return key.Contains("api_key", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("apikey", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("token", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("secret", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("password", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("authorization", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsTokenBudgetKey(ConfigurationFieldDescriptor field, string key)
         => field.ValueKind is ConfigurationValueKind.Integer or ConfigurationValueKind.Number

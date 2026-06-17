@@ -150,9 +150,18 @@ internal static class CliAppHostLaunchResolver
             yield return baseDirectory;
         }
 
+        var baseDirectoryParent = ResolveParentDirectory(baseDirectory);
+        if (!string.IsNullOrWhiteSpace(baseDirectoryParent)
+            && !string.Equals(baseDirectoryParent, workingDirectory, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(baseDirectoryParent, baseDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return baseDirectoryParent;
+        }
+
         if (!string.IsNullOrWhiteSpace(userAppHostProbeRoot)
             && !string.Equals(userAppHostProbeRoot, workingDirectory, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(userAppHostProbeRoot, baseDirectory, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(userAppHostProbeRoot, baseDirectory, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(userAppHostProbeRoot, baseDirectoryParent, StringComparison.OrdinalIgnoreCase))
         {
             yield return userAppHostProbeRoot;
         }
@@ -179,6 +188,16 @@ internal static class CliAppHostLaunchResolver
         }
 
         return null;
+    }
+
+    private static string? ResolveParentDirectory(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        return Directory.GetParent(Path.GetFullPath(directory))?.FullName;
     }
 
     private static string? GetUserAppHostProbeRoot(string? userProfileDirectory = null)

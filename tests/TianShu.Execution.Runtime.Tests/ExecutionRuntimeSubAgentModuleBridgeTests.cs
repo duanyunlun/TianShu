@@ -151,6 +151,66 @@ public sealed class ExecutionRuntimeSubAgentModuleBridgeTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ShouldRejectSubAgentRequestBudgetExceedingParentStepBudget()
+    {
+        var module = new RecordingSubAgentModule(new SubAgentRunResult(
+            "call-spawn-001",
+            "run-child",
+            "thread-child",
+            SubAgentRunStatus.Completed));
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            subAgentModules: new Dictionary<string, ISubAgentModule>(StringComparer.Ordinal)
+            {
+                ["module.sub_agent"] = module,
+            }));
+        var step = CreateSubAgentStep(inputEnvelope: CreateSpawnRequestInput(requestedBudget: Budget(tokenBudget: 2000)));
+
+        var result = await runtime.ExecuteAsync(CreatePlan(step), CreateContext(), CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Blocked, result.Status);
+        Assert.Equal("subagent_requested_budget_exceeds_step_budget", Assert.Single(result.StepResults).Failure?.Code);
+        Assert.Null(module.LastRequest);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldPassParentGovernanceTraceAndBudgetMetadataToSubAgentModule()
+    {
+        var module = new RecordingSubAgentModule(new SubAgentRunResult(
+            "call-spawn-001",
+            "run-child",
+            "thread-child",
+            SubAgentRunStatus.Completed));
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            subAgentModules: new Dictionary<string, ISubAgentModule>(StringComparer.Ordinal)
+            {
+                ["module.sub_agent"] = module,
+            }));
+        var step = CreateSubAgentStep(tracePolicy: new TracePolicy(requiredEventKinds: ["subagent.spawn"]));
+
+        var result = await runtime.ExecuteAsync(
+            CreatePlan(step),
+            CreateContext(
+                policyIds: ["policy-parent"],
+                requiresHumanGate: true,
+                approvalIds: [new ApprovalId("approval-parent")]),
+            CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        Assert.NotNull(module.LastContext);
+        Assert.True(module.LastContext!.Governance.RequiresHumanGate);
+        Assert.Equal("D:/Work/TianShu", module.LastContext.WorkingDirectory);
+        var metadata = module.LastContext.Metadata;
+        Assert.Equal("governance-parent", metadata.Entries["subAgent.parentGovernance"].GetProperty("envelopeId").GetString());
+        Assert.Equal("policy-parent", Assert.Single(metadata.Entries["subAgent.parentGovernance"].GetProperty("policyIds").Items).GetString());
+        Assert.True(metadata.Entries["subAgent.parentTracePolicy"].GetProperty("enabled").GetBoolean());
+        Assert.Equal("subagent.spawn", Assert.Single(metadata.Entries["subAgent.parentTracePolicy"].GetProperty("requiredEventKinds").Items).GetString());
+        Assert.Equal(1000, metadata.Entries["subAgent.parentRuntimeStepBudget"].GetProperty("tokenBudget").GetInt32());
+        Assert.False(metadata.Entries["subAgent.parentPermission"].GetProperty("requiresHumanGate").GetBoolean());
+        Assert.Equal("HostMutation", metadata.Entries["subAgent.parentSideEffect"].GetProperty("level").GetString());
+        Assert.Equal("D:/Work/TianShu", metadata.Entries["subAgent.parentWorkingDirectory"].GetString());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ShouldRejectSubAgentStepWithoutChildLineageMetadata()
     {
         var module = new RecordingSubAgentModule(new SubAgentRunResult(
@@ -192,7 +252,11 @@ public sealed class ExecutionRuntimeSubAgentModuleBridgeTests
             new ExecutionPlanPolicy(stopOnFailure: true),
             new TracePolicy());
 
-    private static ModuleCapabilityStep CreateSubAgentStep(MetadataBag? metadata = null)
+    private static ModuleCapabilityStep CreateSubAgentStep(
+        MetadataBag? metadata = null,
+        StructuredValue? inputEnvelope = null,
+        KernelBudget? budget = null,
+        TracePolicy? tracePolicy = null)
         => new(
             "step-subagent-spawn",
             new CoreIntentId("intent-parent"),
@@ -201,27 +265,33 @@ public sealed class ExecutionRuntimeSubAgentModuleBridgeTests
             new KernelOperationId("operation-tool-exec"),
             "module.sub_agent",
             "sub_agent.spawn",
-            CreateSpawnRequestInput(),
+            inputEnvelope ?? CreateSpawnRequestInput(),
             new PermissionEnvelope(["module.sub_agent"], requiresHumanGate: false, reason: "test"),
             new SideEffectProfile(SideEffectLevel.HostMutation, ["subagent"], reversible: false, requiresAudit: true),
-            new KernelBudget(tokenBudget: 1000, timeBudgetMs: 30000, costBudget: 0, retryBudget: 1, toolCallBudget: 2),
+            budget ?? new KernelBudget(tokenBudget: 1000, timeBudgetMs: 30000, costBudget: 0, retryBudget: 1, toolCallBudget: 2),
             new ContractRef("sub_agent.spawn.output", "v1"),
-            new TracePolicy(),
+            tracePolicy ?? new TracePolicy(),
             metadata ?? CreateSpawnMetadata());
 
-    private static ExecutionRuntimeContext CreateContext(IReadOnlyList<string>? allowedModuleIds = null)
+    private static ExecutionRuntimeContext CreateContext(
+        IReadOnlyList<string>? allowedModuleIds = null,
+        IReadOnlyList<string>? policyIds = null,
+        bool requiresHumanGate = false,
+        IReadOnlyList<ApprovalId>? approvalIds = null)
         => new(
             new ExecutionId("execution-subagent"),
             new KernelRunId("run-parent"),
             new GovernanceEnvelope(
                 "governance-parent",
+                policyIds: policyIds,
                 allowedToolIds: ["spawn_agent", "read_file"],
                 allowedModuleIds: allowedModuleIds ?? ["module.sub_agent"],
                 maxSideEffectLevel: SideEffectLevel.HostMutation,
-                requiresHumanGate: false),
+                requiresHumanGate: requiresHumanGate,
+                approvalIds: approvalIds),
             workingDirectory: "D:/Work/TianShu");
 
-    private static StructuredValue CreateSpawnRequestInput()
+    private static StructuredValue CreateSpawnRequestInput(IReadOnlyDictionary<string, object?>? requestedBudget = null)
         => StructuredValue.FromPlainObject(new Dictionary<string, object?>
         {
             ["spawnCallId"] = "call-spawn-001",
@@ -236,7 +306,7 @@ public sealed class ExecutionRuntimeSubAgentModuleBridgeTests
             ["taskBrief"] = "answer as a child agent",
             ["evidenceRefs"] = new[] { "evidence://parent/one" },
             ["requestedGovernance"] = Governance("governance-child"),
-            ["requestedBudget"] = Budget(),
+            ["requestedBudget"] = requestedBudget ?? Budget(),
             ["requiresHumanGate"] = false,
             ["metadata"] = new Dictionary<string, object?>
             {
@@ -281,14 +351,19 @@ public sealed class ExecutionRuntimeSubAgentModuleBridgeTests
             ["auditRecordIds"] = Array.Empty<string>(),
         };
 
-    private static Dictionary<string, object?> Budget()
+    private static Dictionary<string, object?> Budget(
+        int tokenBudget = 1000,
+        long timeBudgetMs = 30000,
+        decimal costBudget = 0,
+        int retryBudget = 1,
+        int toolCallBudget = 2)
         => new(StringComparer.Ordinal)
         {
-            ["tokenBudget"] = 1000,
-            ["timeBudgetMs"] = 30000,
-            ["costBudget"] = 0,
-            ["retryBudget"] = 1,
-            ["toolCallBudget"] = 2,
+            ["tokenBudget"] = tokenBudget,
+            ["timeBudgetMs"] = timeBudgetMs,
+            ["costBudget"] = costBudget,
+            ["retryBudget"] = retryBudget,
+            ["toolCallBudget"] = toolCallBudget,
         };
 
     private sealed class RecordingSubAgentModule : ISubAgentModule

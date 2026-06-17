@@ -1,143 +1,461 @@
-# 天枢模块接入指南 · Module Integration Guide
+# 天枢模块接入教程 · Module Integration Tutorial
 
-> 本文面向**想为天枢扩展能力的第三方开发者**:如何接入自定义 Provider、Tool 和其他能力模块。
-> 如果你只想运行天枢,请回到 [README](../../README.md) 的「快速开始」。
+> 本文面向想为 TianShu 扩展 Provider、Tool、Memory 能力的第三方开发者。
+> 如果你只想安装和运行 CLI，请回到 [README](../../README.md) 的快速开始。
 
-天枢的最大设计目标之一,是让第三方开发者**在不修改内核的前提下**接入自己的模型、工具与能力。所有能力都通过 **Module Plane(模块层)** 提供,模块只需实现稳定的类型化契约,由组合层装配进运行时——内核、控制层、执行运行时对模块的具体实现一无所知。
+TianShu 的模块接入原则是：第三方实现只依赖公开合同项目，通过 Module Plane 暴露能力，再由组合层按治理规则装配进运行时。模块不得反向调用 Kernel、Control Plane 或 Host Gateway，也不得绕过治理信封、人工审批、配置绑定和健康检查。
 
-## 模块的统一原则
+当前公开模板位于：
 
-无论哪种模块,都遵守同一组边界:
+| 模块类型 | 模板项目 | 测试项目 |
+| --- | --- | --- |
+| Provider | `templates/modules/provider/TianShu.Template.ProviderModule` | `templates/modules/provider/TianShu.Template.ProviderModule.Tests` |
+| Tool | `templates/modules/tool/TianShu.Template.ToolModule` | `templates/modules/tool/TianShu.Template.ToolModule.Tests` |
+| Memory | `templates/modules/memory/TianShu.Template.MemoryModule` | `templates/modules/memory/TianShu.Template.MemoryModule.Tests` |
 
-- **只响应授权调用** — 模块不主动发起编排,只在被授权的 capability call 下执行。
-- **不反向依赖上层** — 模块不能调用内核、控制层或宿主。
-- **不绕过治理** — 权限、副作用、审计声明由 descriptor 表达,执行运行时强制校验。
-- **原始 payload 止于模块边界** — 厂商 wire JSON、字符串命令只允许停留在模块内部,不向上层泄漏,跨层一律用类型化契约。
+当前公开示例位于：
 
----
+| 模块类型 | 示例项目 | 测试项目 | 用途 |
+| --- | --- | --- | --- |
+| Provider | `samples/modules/provider/TianShu.Samples.Provider.Echo` | `samples/modules/provider/TianShu.Samples.Provider.Echo.Tests` | 演示第三方 provider descriptor、manifest、streaming output 和 usage projection。 |
+| Tool | `samples/modules/tool/TianShu.Samples.Tool.WordCount` | `samples/modules/tool/TianShu.Samples.Tool.WordCount.Tests` | 演示只读工具 schema、治理信封、调用和结果投影。 |
+| Memory | `samples/modules/memory/TianShu.Samples.Memory.InMemory` | `samples/modules/memory/TianShu.Samples.Memory.InMemory.Tests` | 演示无外部依赖的 retrieve、form、supersede 和降级边界。 |
 
-## 一、接入自定义 Provider(模型)
+## 准备工作
 
-Provider 模块负责把一次模型调用,转成天枢的**流式事件序列**。这是接入「新模型 / 新厂商 / 自建网关」的入口。
+1. 安装仓库要求的 .NET SDK。
+2. 从模板项目复制一份新模块项目，不要直接修改模板本身。
+3. 为新模块保留独立测试项目，至少覆盖 descriptor、manifest、访问校验和最小 smoke 调用。
+4. 运行模板验证脚本确认本地 SDK 与合同项目可用：
 
-### 1. 实现 `IProviderModule`
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/Build-TianShuModuleTemplates.ps1 -Configuration Release
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/Build-TianShuModuleSamples.ps1 -Configuration Release
+```
+
+也可以单独运行某个模板测试：
+
+```powershell
+dotnet test templates/modules/provider/TianShu.Template.ProviderModule.Tests/TianShu.Template.ProviderModule.Tests.csproj --configuration Release --nologo
+```
+
+## 统一接入规则
+
+所有模块都要满足以下规则：
+
+- 模块身份必须稳定：`ModuleId`、`ProviderId`、`ToolKey` 等公开 id 一旦发布就按兼容契约维护。
+- 模块描述必须完整：descriptor 和 manifest 必须声明能力、权限、side effect、human gate、最低 TianShu 版本、健康检查和实现绑定。
+- 缺配置必须 fail-closed：必需配置未绑定时，组合层拒绝装配并输出 `module_load.required_configuration_missing`，不得回退到假实现或默认 secret。
+- 第三方模块必须显式允许：非内置模块需要通过加载策略 allow-list 后才能进入装配。
+- 原始厂商 payload 只能停在模块内部：跨层输出必须是 TianShu 的类型化合同对象。
+- 运行时只消费已注册记录：discovery candidate 只有通过 loading/composition 后，才会成为 live binding。
+
+## 从零写 Provider
+
+Provider 模块负责把模型厂商或自建网关的响应转换成 TianShu 的统一流式事件。
+
+### 所属项目
+
+Provider 模块至少涉及：
+
+- `TianShu.Provider.Abstractions`：`IProviderModule` 接口。
+- `TianShu.Contracts.Provider`：provider descriptor、manifest、invocation request、stream event、usage。
+- `TianShu.Contracts.Kernel`：运行时输入输出的核心合同类型。
+- 你的第三方项目：例如 `TianShu.Modules.MyProvider`。
+
+### 最小代码骨架
 
 ```csharp
-public interface IProviderModule
-{
-    ProviderDescriptor Descriptor { get; }
+using System.Runtime.CompilerServices;
+using TianShu.Contracts.Kernel;
+using TianShu.Contracts.Provider;
+using TianShu.Provider.Abstractions;
 
-    IAsyncEnumerable<ProviderStreamEvent> InvokeAsync(
+namespace TianShu.Modules.MyProvider;
+
+public sealed class MyProviderModule : IProviderModule
+{
+    public const string ProviderId = "my.provider";
+    public const string WireApi = "my_provider_protocol";
+
+    public ProviderDescriptor Descriptor { get; } = CreateDescriptor();
+
+    public static ProviderModuleManifest CreateManifest()
+        => ProviderModuleDescriptorFactory.CreateAccessManifest(
+            CreateDescriptor(),
+            WireApi,
+            routeSetId: "default",
+            errorSpecs:
+            [
+                new ProviderErrorSpec(
+                    "my_provider_unavailable",
+                    ProviderErrorKind.ProviderUnavailable,
+                    retryable: true,
+                    safeForUser: true,
+                    remediation: "Check provider endpoint and credential.")
+            ]);
+
+    public async IAsyncEnumerable<ProviderStreamEvent> InvokeAsync(
         ProviderInvocationRequest request,
-        CancellationToken cancellationToken);
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var text = "Replace this with real provider output.";
+
+        await Task.Yield();
+        yield return new ProviderTextDeltaEvent(text);
+        yield return new ProviderCompletionEvent(new ProviderCompletion(
+            text,
+            new ProviderUsage(InputTokens: 1, OutputTokens: 1)));
+    }
+
+    private static ProviderDescriptor CreateDescriptor()
+        => ProviderModuleDescriptorFactory.Create(
+            ProviderId,
+            "My Provider",
+            ProviderProtocolKind.Custom,
+            "https://provider.example.invalid/v1",
+            credentialEnvironmentVariable: "MY_PROVIDER_API_KEY",
+            capabilities: new ProviderCapabilityProfile(SupportsStreaming: true),
+            models:
+            [
+                new ProviderModelDescriptor("my-model", "My Model", "my-provider")
+            ],
+            wireApi: WireApi);
 }
 ```
 
-- **`Descriptor`** — 声明 provider id、显示名、协议类型、能力(是否支持流式 / 工具)、支持的模型列表。
-- **`InvokeAsync`** — 接收 provider-neutral 的 `ProviderInvocationRequest`(已由上层归一化的输入),产出 `ProviderStreamEvent` 序列。
+### Provider 必须验证什么
 
-### 2. 产出的关键事件
+- `ProviderDescriptor.ProviderId` 与 `ProviderModuleManifest` 的 provider id 一致，否则校验失败 `provider_access.provider_id_mismatch`。
+- manifest 必须有启用的协议绑定，否则失败 `provider_access.protocol_binding_missing`。
+- route set 必须存在并包含启用候选，否则失败 `provider_access.route_set_missing` 或 `provider_access.route_set_no_enabled_candidate`。
+- endpoint、protocol、wire api 必须与 descriptor/manifest 匹配，否则失败 `provider_access.endpoint_mismatch`。
+- completion 必须输出 usage。真实 provider 应优先投影厂商 usage；厂商缺失时可使用估算 usage，但必须保持可观测，不要伪装成真实计量。
 
-| 事件 | 含义 |
-| --- | --- |
-| `ProviderCompletionEvent` | 模型最终回复 + token usage,作为本轮终态 |
-| `ProviderToolDirectiveEvent` | 模型请求调用工具(callId + toolId + 参数),驱动 turn loop 的 `model-reason → tool-exec` 回边 |
+## 注册 Tool
 
-把厂商的 SSE / HTTP 响应在模块内部解析后,映射成上面这两类事件即可——**厂商协议差异完全封装在模块内**,内核只看到统一的事件流。
+Tool 模块把可被模型请求的能力注册给运行时。所有 Tool 调用都必须先经过 ToolDescriptor、GovernanceEnvelope、side effect 和 human gate 校验。
 
-### 3. 接入要点
+### 所属项目
 
-- 缺凭据时**直接 fail-closed**(返回明确 failure),不要静默降级。
-- 凭据通过环境变量读取,**绝不**写进 descriptor 或配置文件。
-- provider id 要与配置中的 route set / provider instance 对应。
+Tool 模块至少涉及：
 
-> 内置实现可参考 `TianShu.Provider.*`:OpenAI Responses、Anthropic Messages、OpenAI-compatible Chat Completions 三种协议都是同一接口的不同实现。
+- `TianShu.Contracts.Tools`：`ITianShuToolProvider`、`ITianShuToolHandler`、tool descriptor、tool invocation/result。
+- `TianShu.Contracts.Primitives`：permission、side effect、audit 等通用治理类型。
+- `TianShu.Contracts.Kernel`：`GovernanceEnvelope`。
+- 你的第三方项目：例如 `TianShu.Modules.MyTool`。
 
----
-
-## 二、接入自定义 Tool(工具)
-
-Tool 模块为模型提供「可被请求调用的能力」(读文件、搜索、执行等)。模型在 `model-reason` 阶段请求工具,执行运行时校验治理边界后调用。
-
-### 1. 实现 `ITianShuToolProvider` 与 `ITianShuTool`
+### 最小代码骨架
 
 ```csharp
-public interface ITianShuToolProvider
+using System.Text.Json;
+using TianShu.Contracts.Kernel;
+using TianShu.Contracts.Primitives;
+using TianShu.Contracts.Tools;
+
+namespace TianShu.Modules.MyTool;
+
+public sealed class MyToolProvider : ITianShuToolProvider
 {
-    IReadOnlyList<ToolDescriptor> DescribeTools(TianShuToolRegistrationContext context);
-    ITianShuToolHandler CreateHandler(string toolKey, TianShuToolActivationContext context);
+    public const string ModuleId = "my.tool";
+    public const string ToolKey = "my.echo";
+
+    public IReadOnlyList<ToolDescriptor> DescribeTools(TianShuToolRegistrationContext context)
+        => [MyEchoToolHandler.DescriptorValue];
+
+    public ITianShuToolHandler CreateHandler(string toolKey, TianShuToolActivationContext context)
+        => string.Equals(toolKey, ToolKey, StringComparison.Ordinal)
+            ? new MyEchoToolHandler()
+            : throw new InvalidOperationException($"Unknown tool: {toolKey}");
+
+    public static ToolModuleManifest CreateManifest()
+        => new(
+            ModuleId,
+            "My Tool Module",
+            "1.0.0",
+            "0.6.0",
+            tools:
+            [
+                new ToolModuleToolBinding(
+                    ToolKey,
+                    "My Echo",
+                    "Echoes input.",
+                    inputSchema: MySchemas.EchoInput,
+                    outputSchema: MySchemas.EchoOutput,
+                    permission: new PermissionDeclaration(["tool.my.echo"], requiresHumanGate: false),
+                    sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly, ["runtime"], reversible: true),
+                    requiresHumanGate: false)
+            ]);
+
+    public static GovernanceEnvelope CreateGovernance()
+        => new(
+            "my-tool-governance",
+            allowedToolIds: [ToolKey],
+            allowedModuleIds: [ModuleId],
+            maxSideEffectLevel: SideEffectLevel.ReadOnly,
+            requiresHumanGate: false);
 }
 
-public interface ITianShuTool
+public sealed class MyEchoToolHandler : ITianShuToolHandler
 {
-    ToolDescriptor Descriptor { get; }
-    ValueTask<ToolInvocationResult> InvokeAsync(
-        ToolInvocationEnvelope invocation,
-        ToolInvocationContext context,
-        CancellationToken cancellationToken);
+    public static ToolDescriptor DescriptorValue { get; } = new(
+        MyToolProvider.ToolKey,
+        "My Echo",
+        "Echoes input.",
+        inputSchema: MySchemas.EchoInput,
+        outputSchema: MySchemas.EchoOutput,
+        permissions: new PermissionDeclaration(["tool.my.echo"], requiresHumanGate: false),
+        sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly, ["runtime"], reversible: true),
+        audit: new AuditProfile(eventKinds: ["tool.my.echo.invoked"]));
+
+    public ToolDescriptor Descriptor => DescriptorValue;
+
+    public ValueTask<ToolInvocationResult> InvokeAsync(
+        ToolInvocationRequest request,
+        TianShuToolInvocationContext context,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(new ToolInvocationResult(
+            request.CallId,
+            request.ToolKey,
+            streamItems:
+            [
+                new ToolStreamItem("text", request.Input, isTerminal: true)
+            ]));
+    }
+}
+
+internal static class MySchemas
+{
+    public static JsonElement EchoInput { get; } = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        required = new[] { "text" },
+        properties = new { text = new { type = "string" } }
+    });
+
+    public static JsonElement EchoOutput { get; } = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new { text = new { type = "string" } }
+    });
 }
 ```
 
-### 2. `ToolDescriptor` 表达治理边界
+### Tool 必须验证什么
 
-descriptor 不只是「工具叫什么」,它**声明工具的治理属性**,这些属性会被执行运行时强制校验:
+- descriptor 不能为空，否则失败 `tool_access.descriptor_missing`。
+- manifest binding 必须能找到匹配 descriptor，否则失败 `tool_access.descriptor_not_found`。
+- input schema 必须存在，否则失败 `tool_access.schema_missing`。
+- manifest 不能弱化 descriptor 的 side effect 或 human gate，否则失败 `tool_access.side_effect_weakened`、`tool_access.human_gate_weakened`。
+- GovernanceEnvelope 必须允许 module/tool，并且 side effect 不得超过上限，否则失败 `tool_access.module_not_allowed` 或 `tool_access.governance_denied`。
 
-- **输入 schema** — 模型据此构造调用参数。
-- **审批要求(approvalRequirement)** — 是否需要人工 gate(只读工具通常 `None`,写工具通常需要审批)。
-- **副作用等级** — `ReadOnly` / `WorkspaceWrite` / `HostMutation` 等,执行时不得超过当前治理信封允许的上限。
-- **并发类别** — 是否可并行。
+写文件、执行命令、网络调用、MCP tool 等高风险工具应声明更高 side effect，并默认要求 human gate。不要把写操作包装成 `ReadOnly`。
 
-### 3. 接入要点
+## 接入 Memory
 
-- 工具的副作用**必须**如实声明——执行运行时按 `Stage ≤ Graph ≤ Governance` 层层收窄校验,谎报副作用会被 fail-closed 拦截。
-- 只读工具默认可开放;写 / 执行类工具应声明审批要求,并在实现内做路径沙箱、输出截断等防护。
-- 工具要进入某次 turn,必须同时在该次治理的 allow-list 内——**默认不在 allow-list 的工具,模型请求时 fail-closed**。
+Memory 模块负责把记忆供应商接入 TianShu 的上下文策略。当前公开边界包含 retrieve、form、supersede 和 compression-reserved。压缩能力在当前阶段只作为预留边界，不能作为可执行 mutation 暴露。
 
-> 内置工具模块可参考 `TianShu.Tools.*`:FileSystem(只读)、FileSystemMutating(审批写入)、Search、Code、Memory、Artifacts、MCP Resources、Collaboration 等。
+### 所属项目
 
----
+Memory 模块至少涉及：
 
-## 三、其他能力模块
+- `TianShu.Contracts.Memory`：`IMemoryModule`、provider、space、query、mutation、overlay。
+- `TianShu.Contracts.Modules`：module descriptor、health check、implementation binding。
+- `TianShu.Contracts.Kernel`：governance、approved context policy。
+- `TianShu.Contracts.Primitives`：permission、side effect、trust、lifecycle。
+- 你的第三方项目：例如 `TianShu.Modules.MyMemory`。
 
-天枢的 Module Plane 还容纳 Provider / Tool 之外的能力,它们都通过各自的类型化契约接入,统一由 `ModuleDescriptor` 声明身份与治理:
-
-| 模块族(`ModuleKind`) | 职责 |
-| --- | --- |
-| `Provider` | 模型调用 |
-| `Tool` | 可被请求的工具能力 |
-| `MemoryIdentity` | 记忆与身份 |
-| `ArtifactStateProjection` | 工件与状态投影 |
-| `Diagnostics` | 诊断与指标 |
-| `WorkspaceEnvironment` | 工作区环境 |
-| `Configuration` | 配置 |
-| `SubAgentOrchestration` | 子代理编排(嵌套受治理 turn) |
-| `Custom` | 第三方自定义能力 |
-
-第三方能力应优先归入最贴近的 `ModuleKind`;确实无法归类的,用 `Custom`,并通过 `ModuleDescriptor` 完整声明信任等级、副作用与健康检查。
-
----
-
-## 四、装配:模块如何进入运行时
-
-模块不自我注册到内核,而是由**组合层(Composition Root)** 装配后注入。以子代理模块为例,运行时构建时通过绑定表注入:
+### 最小代码骨架
 
 ```csharp
-// 组合层把模块实现注入执行运行时的绑定注册表
-// providers / tools / subAgentModules 都是「id → 实现」的映射
-new ExecutionRuntimeStepBindingRegistry(
-    providers: new Dictionary<string, IProviderModule> { ["provider.default"] = myProvider },
-    tools:     new Dictionary<string, ITianShuTool>   { /* ... */ },
-    subAgentModules: /* ... */);
+using TianShu.Contracts.Kernel;
+using TianShu.Contracts.Memory;
+using TianShu.Contracts.Modules;
+using TianShu.Contracts.Primitives;
+
+namespace TianShu.Modules.MyMemory;
+
+public sealed class MyMemoryModule : IMemoryModule
+{
+    public const string ModuleId = "my.memory";
+    public const string ProviderId = "my.memory.local";
+
+    public ModuleDescriptor Descriptor { get; } = CreateDescriptor();
+
+    public static MemoryModuleManifest CreateManifest()
+        => new(
+            ModuleId,
+            "My Memory Module",
+            "1.0.0",
+            "0.6.0",
+            providers: [CreateProvider()],
+            capabilities:
+            [
+                Capability("my.memory.retrieve", MemoryModuleCapabilityKind.Retrieve, MemoryProviderCapability.Filter | MemoryProviderCapability.ReadOnlyAccess, SideEffectLevel.ReadOnly, false),
+                Capability("my.memory.form", MemoryModuleCapabilityKind.Form, MemoryProviderCapability.Add | MemoryProviderCapability.Extract, SideEffectLevel.ExternalMutation, true),
+                Capability("my.memory.supersede", MemoryModuleCapabilityKind.Supersede, MemoryProviderCapability.Supersede, SideEffectLevel.ExternalMutation, true),
+                Capability("my.memory.compress", MemoryModuleCapabilityKind.CompressReserved, MemoryProviderCapability.None, SideEffectLevel.ReadOnly, true, executable: false)
+            ],
+            new MemoryContextPolicyBinding(
+                ContextSourceKind.MemoryRecord,
+                ContextProjectionMode.ReferenceOnly,
+                requireEvidenceRefs: true,
+                moduleMaySliceContext: false),
+            compressionReservations:
+            [
+                new MemoryCompressionReservation("my.memory.compress.v1", "Reserved compression interface.")
+            ]);
+
+    public ValueTask<ModuleSmokeCheckResult> CheckAsync(CancellationToken cancellationToken)
+        => ValueTask.FromResult(new ModuleSmokeCheckResult(ModuleId, true, ModuleHealthStatus.Healthy));
+
+    public ValueTask<MemoryModuleQueryResult> QueryAsync(
+        MemoryModuleQueryInvocation invocation,
+        CancellationToken cancellationToken)
+        => ValueTask.FromResult(new MemoryModuleQueryResult(degradedProviders: ["my.memory.not_implemented"]));
+
+    public ValueTask<MemoryMutationResult> MutateAsync(
+        MemoryModuleMutationInvocation invocation,
+        CancellationToken cancellationToken)
+        => ValueTask.FromResult(new MemoryMutationResult(
+            Succeeded: false,
+            DegradedReason: "my.memory.not_implemented",
+            Effect: MemoryMutationEffect.Degraded));
+
+    private static MemoryProviderDescriptor CreateProvider()
+        => new(
+            ProviderId,
+            "My Memory Provider",
+            "1.0.0",
+            MemoryProviderCapability.Filter | MemoryProviderCapability.ReadOnlyAccess,
+            [MemoryScopeKind.User, MemoryScopeKind.Workspace],
+            TrustLevel: MemoryProviderTrustLevel.Workspace,
+            DegradationStrategy: MemoryProviderDegradationStrategy.UnsupportedResult);
+
+    private static MemoryModuleCapabilityBinding Capability(
+        string capabilityId,
+        MemoryModuleCapabilityKind kind,
+        MemoryProviderCapability requiredCapabilities,
+        SideEffectLevel sideEffectLevel,
+        bool requiresHumanGate,
+        bool executable = true)
+        => new(
+            capabilityId,
+            kind,
+            ProviderId,
+            requiredCapabilities,
+            new PermissionEnvelope([$"memory.{kind.ToString().ToLowerInvariant()}"], requiresHumanGate),
+            new SideEffectProfile(sideEffectLevel, ["memory"], reversible: sideEffectLevel <= SideEffectLevel.ReadOnly),
+            requiresHumanGate,
+            executable);
+
+    private static ModuleDescriptor CreateDescriptor()
+    {
+        var manifest = CreateManifest();
+        return new ModuleDescriptor(
+            ModuleId,
+            ModuleKind.MemoryIdentity,
+            "My Memory Module",
+            "1.0.0",
+            capabilities: manifest.Capabilities.Select(static capability => new ModuleCapabilityDescriptor(
+                capability.CapabilityId,
+                capability.Kind.ToString(),
+                permission: capability.Permission,
+                sideEffects: capability.SideEffects)).ToArray(),
+            permission: new PermissionEnvelope(["memory.my"], requiresHumanGate: true),
+            sideEffects: new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false),
+            trustLevel: ModuleTrustLevel.UserInstalled,
+            minimumTianShuVersion: "0.6.0",
+            health: new ModuleHealthProbe(ModuleHealthStatus.Healthy),
+            implementationBinding: new ModuleImplementationBinding("TianShu.Modules.MyMemory", typeof(MyMemoryModule).FullName));
+    }
+}
 ```
 
-这样设计的好处:**内核与执行运行时只依赖契约接口,不依赖任何具体模块项目**——你的模块可以是一个完全独立的程序集,装配时才接入,不需要、也不允许内核反向引用它。
+### Memory 必须验证什么
 
----
+- module 必须被 GovernanceEnvelope 允许，否则失败 `memory_access.module_not_allowed`。
+- context policy 必须允许 `MemoryRecord`，否则失败 `memory_access.context_policy_disallows_memory`。
+- memory context projection 不能未声明，模块不能自行裁切上下文，否则失败 `memory_access.context_projection_unspecified` 或 `memory_access.context_slicing_owned_by_module`。
+- provider/capability id 不能重复，否则失败 `memory_access.duplicate_provider` 或 `memory_access.duplicate_capability`。
+- retrieve/form/supersede/compress-reserved 必须都有声明，否则失败 `memory_access.retrieve_missing`、`memory_access.form_missing`、`memory_access.supersede_missing`、`memory_access.compression_reserved_missing`。
+- compression reservation 必须保持 reserved-only，不能在当前阶段变成 executable，否则失败 `memory_access.compression_reserved_executable`。
+
+## 模块装配流程
+
+模块进入运行时要经过四步：
+
+1. Discovery：扫描内置模块和第三方模块 manifest，生成候选快照。
+2. Selection：重复 id、禁用模块、损坏 manifest 会在候选层被标记或剔除。
+3. Loading：组合根按 `ModuleLoadingPolicy` 校验 trust、allow-list、required configuration、health、version、implementation binding。
+4. Binding：只有 `Registered` 的记录才会写入 provider/tool/memory 绑定表，供 Execution Runtime 调用。
+
+典型装配策略包含：
+
+```csharp
+var policy = new ModuleLoadingPolicy(
+    currentTianShuVersion: "0.6.0",
+    explicitlyAllowedModuleIds: ["my.provider", "my.tool", "my.memory"],
+    boundConfigurationKeys:
+    [
+        "providers.my_provider.api_key",
+        "providers.my_provider.base_url"
+    ]);
+```
+
+第三方模块常见装配结果：
+
+| 状态 | 含义 |
+| --- | --- |
+| `Registered` | 已通过所有校验，可进入 live binding。 |
+| `Rejected` | 配置、信任、版本、descriptor、manifest 等硬性条件不满足。 |
+| `Unavailable` | 模块存在但健康检查不通过。 |
+| `Skipped` | discovery 未选择，例如禁用或损坏候选。 |
+
+## 故障排查
+
+| 诊断码 | 常见原因 | 修复方向 |
+| --- | --- | --- |
+| `module_discovery.disabled` | manifest 或配置禁用了模块。 | 确认模块启用开关。 |
+| `module_discovery.duplicate_rejected` | 多个模块声明同一 module id。 | 保留一个稳定 id，重命名冲突模块。 |
+| `module_load.candidate_not_selected` | discovery 未选中该候选。 | 先看 discovery issue，不要直接排查 runtime binding。 |
+| `module_load.descriptor_missing` | candidate 没有 ModuleDescriptor。 | 为模块实现补齐 descriptor。 |
+| `module_load.descriptor_manifest_mismatch` | descriptor 与 manifest 的 id 或 kind 不一致。 | 统一 module id、kind。 |
+| `module_load.trust_denied` | 模块 trust level 低于加载策略要求。 | 调整 trust 声明或加载策略。 |
+| `module_load.third_party_not_allowed` | 第三方模块未进入 allow-list。 | 在加载策略中显式允许 module id。 |
+| `module_load.required_configuration_missing` | 必需配置键未绑定。 | 补齐配置并加入 `BoundConfigurationKeys`。 |
+| `module_load.health_not_healthy` | 健康检查未通过。 | 修复凭据、端点、依赖服务或模块自身检查逻辑。 |
+| `module_load.version_incompatible` | 模块要求的最低 TianShu 版本高于当前版本。 | 升级 TianShu 或降低模块最低版本要求。 |
+| `module_load.implementation_binding_missing` | descriptor 没有实现绑定。 | 补齐 assembly/type binding。 |
+| `provider_access.protocol_binding_missing` | Provider manifest 缺少启用协议绑定。 | 补齐 protocol binding，并确保 wire api 匹配。 |
+| `provider_access.route_set_no_enabled_candidate` | route set 内没有可用模型候选。 | 启用至少一个 model candidate。 |
+| `tool_access.schema_missing` | Tool 没有 input schema。 | 为每个 tool binding 声明 JSON schema。 |
+| `tool_access.governance_denied` | governance 未允许该 tool 或 side effect 超限。 | 收窄工具声明或扩大治理信封，优先收窄工具声明。 |
+| `tool_access.human_gate_weakened` | manifest 关闭了 descriptor 要求的审批。 | 让 manifest 与 descriptor 的 human gate 保持一致或更严格。 |
+| `memory_access.context_policy_disallows_memory` | 已批准 context policy 不允许 MemoryRecord。 | 在 context policy 中显式允许 MemoryRecord。 |
+| `memory_access.provider_capability_missing` | provider 不具备 capability 要求的能力。 | 调整 provider capability 或 capability binding。 |
+| `memory_access.compression_reserved_executable` | 压缩预留能力被错误设为可执行。 | 保持 `CompressReserved` 为 reserved-only。 |
+
+## 发布前检查清单
+
+公开发布第三方模块前，至少完成：
+
+- 模板测试和模块自身测试通过。
+- descriptor、manifest、implementation binding、health check 都有测试覆盖。
+- Provider usage 投影有真实/估算/缺失的可观测区分。
+- Tool 的 side effect 与 human gate 没有弱化。
+- Memory 的 context policy 和 compression reservation 没有绕过运行时。
+- 文档、示例配置、测试 fixture 不包含 API key、个人路径或私有端点。
 
 ## 设计文档
 
-模块边界的完整定义见架构文档:
+模块边界的完整定义见：
 
-- [模块层设计](../architecture/tianshu-module-plane-design.md) — Module / Tool 描述、权限、副作用、审计契约
-- [执行运行时设计](../architecture/tianshu-execution-runtime-design.md) — runtime step、provider/tool bridge
-- [契约架构](../architecture/tianshu-contracts-architecture.md) — 跨层类型化契约边界
+- [模块层设计](../architecture/tianshu-module-plane-design.md)
+- [执行运行时设计](../architecture/tianshu-execution-runtime-design.md)
+- [契约架构](../architecture/tianshu-contracts-architecture.md)

@@ -1,4 +1,5 @@
 using TianShu.Contracts.Agents;
+using TianShu.Contracts.Memory;
 using TianShu.Contracts.Tools;
 using TianShu.Provider.Abstractions;
 
@@ -13,16 +14,19 @@ public sealed class ExecutionRuntimeStepBindingRegistry : IAsyncDisposable
     private readonly IReadOnlyDictionary<string, IProviderModule> providers;
     private readonly IReadOnlyDictionary<string, ITianShuTool> tools;
     private readonly IReadOnlyDictionary<string, ISubAgentModule> subAgentModules;
+    private readonly IReadOnlyDictionary<string, IMemoryModule> memoryModules;
     private bool disposed;
 
     public ExecutionRuntimeStepBindingRegistry(
         IReadOnlyDictionary<string, IProviderModule>? providers = null,
         IReadOnlyDictionary<string, ITianShuTool>? tools = null,
-        IReadOnlyDictionary<string, ISubAgentModule>? subAgentModules = null)
+        IReadOnlyDictionary<string, ISubAgentModule>? subAgentModules = null,
+        IReadOnlyDictionary<string, IMemoryModule>? memoryModules = null)
     {
         this.providers = providers ?? new Dictionary<string, IProviderModule>(StringComparer.Ordinal);
         this.tools = tools ?? new Dictionary<string, ITianShuTool>(StringComparer.Ordinal);
         this.subAgentModules = subAgentModules ?? new Dictionary<string, ISubAgentModule>(StringComparer.Ordinal);
+        this.memoryModules = memoryModules ?? new Dictionary<string, IMemoryModule>(StringComparer.Ordinal);
     }
 
     public bool TryGetProvider(string providerModuleId, out IProviderModule provider)
@@ -33,6 +37,9 @@ public sealed class ExecutionRuntimeStepBindingRegistry : IAsyncDisposable
 
     public bool TryGetSubAgentModule(string moduleId, out ISubAgentModule module)
         => subAgentModules.TryGetValue(moduleId, out module!);
+
+    public bool TryGetMemoryModule(string moduleId, out IMemoryModule module)
+        => memoryModules.TryGetValue(moduleId, out module!);
 
     public async ValueTask DisposeAsync()
     {
@@ -46,6 +53,7 @@ public sealed class ExecutionRuntimeStepBindingRegistry : IAsyncDisposable
         AddDisposableBindings(providers.Values, disposableBindings);
         AddDisposableBindings(tools.Values, disposableBindings);
         AddDisposableBindings(subAgentModules.Values, disposableBindings);
+        AddDisposableBindings(memoryModules.Values, disposableBindings);
 
         foreach (var binding in disposableBindings)
         {

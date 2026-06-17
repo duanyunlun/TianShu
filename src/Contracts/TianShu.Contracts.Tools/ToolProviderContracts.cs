@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TianShu.Contracts.Kernel;
 using TianShu.Contracts.Memory;
 using TianShu.Contracts.Primitives;
 
@@ -39,6 +40,7 @@ public sealed record TianShuToolInvocationContext(
     IReadOnlyList<TianShuToolDiscoveryDescriptor>? DynamicTools = null,
     ITianShuMemoryToolServices? MemoryServices = null,
     ITianShuMcpResourceToolServices? McpResourceServices = null,
+    ITianShuMcpToolServices? McpToolServices = null,
     ITianShuFileMutationToolServices? FileMutationServices = null,
     ITianShuToolSuggestionServices? ToolSuggestionServices = null,
     ITianShuShellToolServices? ShellServices = null,
@@ -315,6 +317,104 @@ public sealed record TianShuMcpListResourceTemplatesResult(
 public sealed record TianShuMcpReadResourceResult(string Server, string Uri, JsonElement Result);
 
 /// <summary>
+/// MCP tool 描述符，用于把远端 MCP tool 投影为统一 ToolDescriptor。
+/// MCP tool descriptor used to project a remote MCP tool into a unified ToolDescriptor.
+/// </summary>
+public sealed record TianShuMcpToolDescriptor
+{
+    public TianShuMcpToolDescriptor(
+        string serverId,
+        string toolName,
+        string toolId,
+        string displayName,
+        string description,
+        JsonElement inputSchema,
+        JsonElement? outputSchema = null,
+        SideEffectLevel sideEffectLevel = SideEffectLevel.ExternalMutation,
+        bool requiresHumanGate = true,
+        IReadOnlyList<string>? requiredScopes = null,
+        ToolImplementationKind implementationKind = ToolImplementationKind.McpStdio)
+    {
+        ServerId = IdentifierGuard.AgainstNullOrWhiteSpace(serverId, nameof(serverId));
+        ToolName = IdentifierGuard.AgainstNullOrWhiteSpace(toolName, nameof(toolName));
+        ToolId = IdentifierGuard.AgainstNullOrWhiteSpace(toolId, nameof(toolId));
+        DisplayName = IdentifierGuard.AgainstNullOrWhiteSpace(displayName, nameof(displayName));
+        Description = IdentifierGuard.AgainstNullOrWhiteSpace(description, nameof(description));
+        InputSchema = inputSchema.Clone();
+        OutputSchema = outputSchema?.Clone();
+        SideEffectLevel = sideEffectLevel;
+        RequiresHumanGate = requiresHumanGate;
+        RequiredScopes = requiredScopes ?? [$"mcp.{serverId}.{toolName}"];
+        ImplementationKind = implementationKind;
+    }
+
+    public string ServerId { get; }
+
+    public string ToolName { get; }
+
+    public string ToolId { get; }
+
+    public string DisplayName { get; }
+
+    public string Description { get; }
+
+    public JsonElement InputSchema { get; }
+
+    public JsonElement? OutputSchema { get; }
+
+    public SideEffectLevel SideEffectLevel { get; }
+
+    public bool RequiresHumanGate { get; }
+
+    public IReadOnlyList<string> RequiredScopes { get; }
+
+    public ToolImplementationKind ImplementationKind { get; }
+}
+
+/// <summary>
+/// MCP tool 调用请求。
+/// MCP tool invocation request.
+/// </summary>
+public sealed record TianShuMcpToolRequest(
+    string ServerId,
+    string ToolName,
+    string ToolKey,
+    StructuredValue Arguments,
+    string RuntimeStepId,
+    string SourceGraphId,
+    string SourceStageId,
+    MetadataBag? Metadata = null)
+{
+    public MetadataBag Metadata { get; init; } = Metadata ?? MetadataBag.Empty;
+}
+
+/// <summary>
+/// MCP tool 调用结果。
+/// MCP tool invocation result.
+/// </summary>
+public sealed record TianShuMcpToolResult(
+    bool Success,
+    string OutputText,
+    StructuredValue? StructuredOutput = null,
+    IReadOnlyList<ToolOutputContentItem>? OutputContentItems = null,
+    IReadOnlyList<JsonElement>? RawOutputContentItems = null,
+    string? FailureCode = null,
+    string? FailureMessage = null);
+
+/// <summary>
+/// MCP Tool 工具域可调用的受治理宿主能力。
+/// Governed host capabilities available to the MCP Tool domain.
+/// </summary>
+public interface ITianShuMcpToolServices
+{
+    /// <summary>
+    /// 通过宿主治理链路执行 MCP tool。
+    /// Invokes an MCP tool through the host-governed execution path.
+    /// </summary>
+    Task<TianShuMcpToolResult> InvokeMcpToolAsync(TianShuMcpToolRequest request, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Code / REPL 工具调用请求。
 /// Code / REPL tool invocation request.
 /// </summary>
@@ -412,7 +512,8 @@ public sealed record TianShuShellToolRequest(string ToolKey, StructuredValue Arg
 public sealed record TianShuShellToolResult(
     bool Success,
     string OutputText,
-    StructuredValue? StructuredOutput = null);
+    StructuredValue? StructuredOutput = null,
+    string? FailureCode = null);
 
 /// <summary>
 /// 可建议安装或启用的 connector。

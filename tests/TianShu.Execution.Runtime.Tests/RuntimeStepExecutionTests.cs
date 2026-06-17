@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TianShu.Contracts.Execution;
 using TianShu.Contracts.Artifacts;
 using TianShu.Contracts.Collaboration;
@@ -12,6 +13,7 @@ using TianShu.Contracts.Primitives;
 using TianShu.Contracts.Provider;
 using TianShu.Contracts.Tools;
 using TianShu.Provider.Abstractions;
+using TianShu.RuntimeComposition;
 
 namespace TianShu.Execution.Runtime.Tests;
 
@@ -341,6 +343,461 @@ public sealed class RuntimeStepExecutionTests
     }
 
     [Fact]
+    public void KernelRuntimeTurnLoopComposition_ShouldRegisterShellOnlyWhenExplicitlyIncluded()
+    {
+        var defaultTools = KernelRuntimeTurnLoopComposition.CreateTools();
+        var shellTools = KernelRuntimeTurnLoopComposition.CreateTools(includeShell: true);
+
+        Assert.DoesNotContain("shell_command", defaultTools.Keys);
+        Assert.Contains("shell_command", shellTools.Keys);
+        var shellTool = shellTools["shell_command"];
+        Assert.Equal(SideEffectLevel.HostMutation, shellTool.Descriptor.SideEffects.Level);
+        Assert.True(shellTool.Descriptor.Permissions.RequiresHumanGate);
+        Assert.Equal(ToolApprovalRequirement.Required, shellTool.Descriptor.ApprovalRequirement);
+    }
+
+    [Fact]
+    public void KernelRuntimeTurnLoopComposition_ShouldRegisterWorkspaceMutationToolsOnlyWhenExplicitlyIncluded()
+    {
+        var defaultTools = KernelRuntimeTurnLoopComposition.CreateTools();
+        var writeTools = KernelRuntimeTurnLoopComposition.CreateTools(includeWorkspaceWrite: true);
+
+        Assert.DoesNotContain("write", defaultTools.Keys);
+        Assert.DoesNotContain("apply_patch", defaultTools.Keys);
+        Assert.Contains("write", writeTools.Keys);
+        Assert.Contains("apply_patch", writeTools.Keys);
+        Assert.Equal(SideEffectLevel.WorkspaceWrite, writeTools["apply_patch"].Descriptor.SideEffects.Level);
+        Assert.True(writeTools["apply_patch"].Descriptor.Permissions.RequiresHumanGate);
+    }
+
+    [Fact]
+    public void KernelRuntimeTurnLoopComposition_ShouldRegisterMcpOnlyWhenExplicitlyIncluded()
+    {
+        var defaultTools = KernelRuntimeTurnLoopComposition.CreateTools();
+        var mcpTools = KernelRuntimeTurnLoopComposition.CreateTools(
+            includeMcp: true,
+            mcpToolDescriptors: [CreateMcpToolDescriptor()]);
+
+        Assert.DoesNotContain("list_mcp_resources", defaultTools.Keys);
+        Assert.DoesNotContain("mcp.docs.search", defaultTools.Keys);
+        Assert.Contains("list_mcp_resources", mcpTools.Keys);
+        Assert.Contains("mcp.docs.search", mcpTools.Keys);
+        Assert.Equal(SideEffectLevel.ReadOnly, mcpTools["list_mcp_resources"].Descriptor.SideEffects.Level);
+        Assert.False(mcpTools["list_mcp_resources"].Descriptor.Permissions.RequiresHumanGate);
+        Assert.Equal(SideEffectLevel.ExternalMutation, mcpTools["mcp.docs.search"].Descriptor.SideEffects.Level);
+        Assert.True(mcpTools["mcp.docs.search"].Descriptor.Permissions.RequiresHumanGate);
+    }
+
+    [Fact]
+    public void KernelRuntimeTurnLoopComposition_ShouldRegisterMemoryOnlyWhenExplicitlyIncluded()
+    {
+        var defaultTools = KernelRuntimeTurnLoopComposition.CreateTools();
+        var memoryTools = KernelRuntimeTurnLoopComposition.CreateTools(includeMemory: true);
+
+        Assert.DoesNotContain("memory_search", defaultTools.Keys);
+        Assert.Contains("memory_search", memoryTools.Keys);
+        Assert.Contains("memory_explain_overlay", memoryTools.Keys);
+        Assert.Contains("memory_feedback", memoryTools.Keys);
+        Assert.Equal(SideEffectLevel.ReadOnly, memoryTools["memory_search"].Descriptor.SideEffects.Level);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRunMcpResourceThroughRuntimeStepWhenExplicitlyBound()
+    {
+        var services = new RecordingMcpServices();
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpResourceServices: services)));
+        var context = CreateContext(SideEffectLevel.ReadOnly, allowedToolIds: ["list_mcp_resources"]);
+        var plan = CreateShellPlan(CreateMcpResourceStep("mcp-resource-step"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, stepResult.Status);
+        Assert.Equal(1, services.ListResourcesCount);
+        Assert.NotNull(stepResult.Output);
+        Assert.Equal("tool.mcp_resource", stepResult.Output!.GetProperty("toolRuntimeBoundary").GetString());
+        var toolResult = Assert.Single(stepResult.Output.GetProperty("toolResults").Items);
+        Assert.Equal("tool.mcp_resource", toolResult.GetProperty("runtimeBoundary").GetString());
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("tool.mcp_resource", payload.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("list_resources", payload.GetProperty("operation").GetString());
+        Assert.Equal("docs", payload.GetProperty("server").GetString());
+        var resource = Assert.Single(payload.GetProperty("resources").Items);
+        Assert.Equal("docs://readme", resource.GetProperty("uri").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRunMcpToolThroughGovernedRuntimeStepWhenExplicitlyBoundAndApproved()
+    {
+        var services = new RecordingMcpServices();
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpToolDescriptors: [CreateMcpToolDescriptor()],
+                mcpToolServices: services)));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            allowedToolIds: ["mcp.docs.search"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-mcp-001")]);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-step"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, stepResult.Status);
+        Assert.Equal(1, services.InvokeMcpToolCount);
+        Assert.NotNull(services.LastMcpToolRequest);
+        Assert.Equal("docs", services.LastMcpToolRequest!.ServerId);
+        Assert.Equal("search", services.LastMcpToolRequest.ToolName);
+        Assert.Equal("tool.mcp_tool", stepResult.Output!.GetProperty("toolRuntimeBoundary").GetString());
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("tool.mcp_tool", payload.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("succeeded", payload.GetProperty("status").GetString());
+        Assert.Equal("docs", payload.GetProperty("serverId").GetString());
+        Assert.Equal("search", payload.GetProperty("toolName").GetString());
+        Assert.Equal("search-ok", payload.GetProperty("output").GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldBlockMcpToolBeforeInvocationWithoutApproval()
+    {
+        var services = new RecordingMcpServices();
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpToolDescriptors: [CreateMcpToolDescriptor()],
+                mcpToolServices: services)));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            allowedToolIds: ["mcp.docs.search"],
+            requiresHumanGate: true);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-missing-approval"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("runtime_step_missing_approval", stepResult.Failure?.Code);
+        Assert.Equal(0, services.InvokeMcpToolCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectMcpToolWhenStepDowngradesRemoteSideEffect()
+    {
+        var services = new RecordingMcpServices();
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpToolDescriptors: [CreateMcpToolDescriptor()],
+                mcpToolServices: services)));
+        var context = CreateContext(SideEffectLevel.ReadOnly, allowedToolIds: ["mcp.docs.search"]);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-side-effect-downgrade", SideEffectLevel.ReadOnly, requiresHumanGate: false));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("tool_descriptor_not_allowed_by_governance", stepResult.Failure?.Code);
+        Assert.Equal(0, services.InvokeMcpToolCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldProjectMcpToolRemoteFailure()
+    {
+        var services = new RecordingMcpServices(invokeMcpTool: request =>
+        {
+            _ = request;
+            return Task.FromResult(new TianShuMcpToolResult(
+                false,
+                "server unavailable",
+                StructuredValue.FromPlainObject(new Dictionary<string, object?>
+                {
+                    ["reason"] = "unavailable",
+                }),
+                FailureCode: "mcp_server_unavailable",
+                FailureMessage: "MCP server docs is unavailable."));
+        });
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpToolDescriptors: [CreateMcpToolDescriptor()],
+                mcpToolServices: services)));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            allowedToolIds: ["mcp.docs.search"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-mcp-001")]);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-remote-failure"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Failed, stepResult.Status);
+        Assert.Equal("mcp_server_unavailable", stepResult.Failure?.Code);
+        Assert.Equal(1, services.InvokeMcpToolCount);
+        Assert.Equal("tool.mcp_tool", stepResult.Output!.GetProperty("toolRuntimeBoundary").GetString());
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("failed", payload.GetProperty("status").GetString());
+        Assert.Equal("mcp_server_unavailable", payload.GetProperty("failureCode").GetString());
+        Assert.Equal("tool.mcp_tool", payload.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("docs", payload.GetProperty("serverId").GetString());
+        Assert.Equal("search", payload.GetProperty("toolName").GetString());
+        Assert.Equal("unavailable", payload.GetProperty("output").GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldProjectMcpToolExceptionAsRemoteFailure()
+    {
+        var services = new RecordingMcpServices(invokeMcpTool: request =>
+        {
+            _ = request;
+            throw new InvalidOperationException("connection refused");
+        });
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(
+                includeMcp: true,
+                mcpToolDescriptors: [CreateMcpToolDescriptor()],
+                mcpToolServices: services)));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            allowedToolIds: ["mcp.docs.search"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-mcp-001")]);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-exception-failure"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Failed, stepResult.Status);
+        Assert.Equal("mcp_tool_remote_failure", stepResult.Failure?.Code);
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("failed", payload.GetProperty("status").GetString());
+        Assert.Equal("mcp_tool_remote_failure", payload.GetProperty("failureCode").GetString());
+        Assert.Equal("tool.mcp_tool", payload.GetProperty("runtimeBoundary").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldBlockUnopenedMcpToolInsteadOfSyntheticSuccess()
+    {
+        await using var runtime = new TianShuExecutionRuntime();
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            allowedToolIds: ["mcp.docs.search"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-mcp-001")]);
+        var plan = CreateShellPlan(CreateMcpToolStep("mcp-tool-unopened"));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("mcp_tool_not_opened", stepResult.Failure?.Code);
+        Assert.Null(stepResult.Output);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRunShellCommandThroughRuntimeStepWhenExplicitlyBoundAndApproved()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateContext(
+            SideEffectLevel.HostMutation,
+            allowedToolIds: ["shell_command"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-shell-001")],
+            workingDirectory: workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-success", CreateShellInput(SuccessfulShellCommand())));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, stepResult.Status);
+        Assert.NotNull(stepResult.Output);
+        Assert.Equal("execution.runtime.tool_bridge", stepResult.Output!.GetProperty("runtimeBoundary").GetString());
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("tool.shell_execution", payload.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("succeeded", payload.GetProperty("status").GetString());
+        Assert.Equal("shell_command", payload.GetProperty("toolId").GetString());
+        Assert.Equal(0, payload.GetProperty("exitCode").GetInt32());
+        Assert.Contains("shell-ok", payload.GetProperty("stdoutPreview").GetString(), StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("transcriptRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("auditRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("traceRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("commandHash").GetString()));
+        Assert.Equal("sanitized", payload.GetProperty("redactionStatus").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldBlockShellCommandBeforeInvocationWithoutApproval()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateContext(
+            SideEffectLevel.HostMutation,
+            allowedToolIds: ["shell_command"],
+            requiresHumanGate: true,
+            workingDirectory: workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-missing-approval", CreateShellInput(SuccessfulShellCommand())));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("runtime_step_missing_approval", stepResult.Failure?.Code);
+        Assert.Null(stepResult.Output);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldBlockUnopenedShellToolInsteadOfSyntheticSuccess()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = new TianShuExecutionRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-unopened", CreateShellInput(SuccessfulShellCommand())));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("shell_tool_not_opened", stepResult.Failure?.Code);
+        Assert.Null(stepResult.Output);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectDangerousShellCommandBeforeExecution()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        var sentinel = Path.Combine(workspace.Path, "sentinel.txt");
+        await File.WriteAllTextAsync(sentinel, "must remain", CancellationToken.None);
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var command = OperatingSystem.IsWindows()
+            ? "Remove-Item -Recurse -Force ."
+            : "rm -rf .";
+        var plan = CreateShellPlan(CreateShellStep("shell-step-dangerous", CreateShellInput(command)));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("shell_dangerous_command_rejected", stepResult.Failure?.Code);
+        Assert.True(File.Exists(sentinel));
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("shell_dangerous_command_rejected", payload.GetProperty("failureCode").GetString());
+        Assert.Equal("failed", payload.GetProperty("status").GetString());
+        Assert.False(payload.GetProperty("timedOut").GetBoolean());
+        Assert.False(payload.GetProperty("outputTruncated").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(payload.GetProperty("transcriptRef").GetString()));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectShellCwdOutsideWorkspace()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        using var outside = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep(
+            "shell-step-cwd-denied",
+            CreateShellInput(SuccessfulShellCommand(), workdir: outside.Path)));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Blocked, stepResult.Status);
+        Assert.Equal("shell_cwd_not_allowed", stepResult.Failure?.Code);
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("shell_cwd_not_allowed", payload.GetProperty("failureCode").GetString());
+        Assert.Equal("failed", payload.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectSensitiveShellEnvironmentAndKeepAllowedOverrides()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var command = OperatingSystem.IsWindows()
+            ? "Write-Output $env:TIANSHU_SAFE_ENV_TEST; Write-Output $env:OPENAI_API_KEY"
+            : "printf '%s\\n%s\\n' \"$TIANSHU_SAFE_ENV_TEST\" \"$OPENAI_API_KEY\"";
+        var plan = CreateShellPlan(CreateShellStep(
+            "shell-step-env",
+            CreateShellInput(
+                command,
+                env: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["TIANSHU_SAFE_ENV_TEST"] = "safe-value",
+                    ["OPENAI_API_KEY"] = "must-not-flow",
+                })));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        var payload = GetSingleToolStreamPayload(Assert.Single(result.StepResults));
+        Assert.Contains("safe-value", payload.GetProperty("stdoutPreview").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("must-not-flow", payload.GetProperty("stdoutPreview").GetString(), StringComparison.Ordinal);
+        Assert.Contains("OPENAI_API_KEY", payload.GetProperty("rejectedEnvironmentKeys").Items.Select(static item => item.GetString()));
+        Assert.Contains("API_KEY", payload.GetProperty("redactedEnvironmentKeys").Items.Select(static item => item.GetString()));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldProjectShellNonZeroExit()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-nonzero", CreateShellInput("exit 7")));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Failed, stepResult.Status);
+        Assert.Equal("shell_nonzero_exit", stepResult.Failure?.Code);
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("shell_nonzero_exit", payload.GetProperty("failureCode").GetString());
+        Assert.Equal(7, payload.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldProjectShellTimeout()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-timeout", CreateShellInput(SleepShellCommand(), timeoutMs: 50)));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        var stepResult = Assert.Single(result.StepResults);
+        Assert.Equal(RuntimeStepResultStatus.Failed, stepResult.Status);
+        Assert.Equal("shell_timeout", stepResult.Failure?.Code);
+        var payload = GetSingleToolStreamPayload(stepResult);
+        Assert.Equal("shell_timeout", payload.GetProperty("failureCode").GetString());
+        Assert.True(payload.GetProperty("timedOut").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldProjectShellOutputTruncation()
+    {
+        using var workspace = new TempRuntimeWorkspace();
+        await using var runtime = CreateShellRuntime();
+        var context = CreateApprovedShellContext(workspace.Path);
+        var plan = CreateShellPlan(CreateShellStep("shell-step-truncated", CreateShellInput(LargeOutputShellCommand())));
+
+        var result = await runtime.ExecuteAsync(plan, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        var payload = GetSingleToolStreamPayload(Assert.Single(result.StepResults));
+        Assert.True(payload.GetProperty("outputTruncated").GetBoolean());
+        Assert.True(payload.GetProperty("stdoutPreview").GetString()!.Length <= 12_000);
+    }
+
+    [Fact]
     public async Task ExecutionRuntimeProviderBridge_ShouldPassProviderInvocationRequestWithRuntimeContext()
     {
         var bridge = new ExecutionRuntimeProviderBridge();
@@ -618,6 +1075,175 @@ public sealed class RuntimeStepExecutionTests
         Assert.Equal(RuntimeStepResultStatus.Blocked, result.Status);
         Assert.Equal("runtime_step_module_not_allowed", result.Failure?.Code);
         Assert.Null(module.LastQuery);
+    }
+
+    [Fact]
+    public async Task ExecuteStepAsync_ShouldDispatchMemoryRetrieveThroughBoundMemoryModule()
+    {
+        var module = new RecordingMemoryModule("memory.identity");
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            memoryModules: new Dictionary<string, IMemoryModule>(StringComparer.Ordinal)
+            {
+                [module.Descriptor.ModuleId] = module,
+            }));
+        var context = CreateContext(SideEffectLevel.ExternalMutation);
+        var step = CreateMemoryModuleStep(
+            "memory-retrieve-live",
+            SideEffectLevel.ReadOnly,
+            "memory.retrieve",
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["memorySpaceId"] = "space-test",
+                ["queryText"] = "architecture",
+            }),
+            new PermissionEnvelope(["memory.retrieve"], requiresHumanGate: false));
+
+        var result = await runtime.ExecuteStepAsync(step, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        Assert.NotNull(module.LastQuery);
+        var query = Assert.IsType<FilterMemoryModuleQuery>(module.LastQuery!.Query);
+        Assert.Equal(new MemorySpaceId("space-test"), query.Query.MemorySpaceId);
+        Assert.Equal("architecture", query.Query.QueryText);
+        Assert.Equal(step.StepId, module.LastQuery.Context.RuntimeStepId);
+        Assert.Equal(step.CapabilityId, module.LastQuery.Context.OperationContext.PolicyOverrides["capabilityId"]);
+        Assert.Equal("execution.runtime.memory_module_bridge", result.Output!.GetProperty("runtimeBoundary").StringValue);
+    }
+
+    [Fact]
+    public async Task ExecuteStepAsync_ShouldDispatchMemoryFormThroughBoundMemoryModule()
+    {
+        var module = new RecordingMemoryModule("memory.identity");
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            memoryModules: new Dictionary<string, IMemoryModule>(StringComparer.Ordinal)
+            {
+                [module.Descriptor.ModuleId] = module,
+            }));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-memory-form")]);
+        var step = CreateMemoryModuleStep(
+            "memory-form-live",
+            SideEffectLevel.ExternalMutation,
+            "memory.form",
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["memorySpaceId"] = "space-test",
+                ["key"] = "preference.language",
+                ["value"] = "zh-CN",
+                ["confidence"] = "0.8",
+                ["sourceId"] = "turn-001",
+                ["sourceKind"] = "Conversation",
+                ["sourceSnippet"] = "用户偏好中文。",
+            }),
+            new PermissionEnvelope(["memory.form"], requiresHumanGate: true));
+
+        var result = await runtime.ExecuteStepAsync(step, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        Assert.NotNull(module.LastMutation);
+        var mutation = Assert.IsType<AddMemoryModuleMutation>(module.LastMutation!.Mutation);
+        Assert.Equal(new MemorySpaceId("space-test"), mutation.Command.MemorySpaceId);
+        Assert.Equal("preference.language", mutation.Command.Key);
+        Assert.Equal("zh-CN", mutation.Command.Value.StringValue);
+        Assert.Equal(0.8m, mutation.Command.Confidence);
+        Assert.Equal(MemorySourceKind.Conversation, mutation.Command.Source!.SourceKind);
+        Assert.Equal("turn-001", mutation.Command.Source.SourceId);
+        Assert.Equal("用户偏好中文。", mutation.Command.Source.Snippet);
+        Assert.Equal(step.StepId, module.LastMutation.Context.RuntimeStepId);
+    }
+
+    [Fact]
+    public async Task ExecuteStepAsync_ShouldDispatchMemorySupersedeThroughBoundMemoryModule()
+    {
+        var module = new RecordingMemoryModule("memory.identity");
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            memoryModules: new Dictionary<string, IMemoryModule>(StringComparer.Ordinal)
+            {
+                [module.Descriptor.ModuleId] = module,
+            }));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-memory-supersede")]);
+        var step = CreateMemoryModuleStep(
+            "memory-supersede-live",
+            SideEffectLevel.ExternalMutation,
+            "memory.supersede",
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["oldRecordId"] = "record-old",
+                ["memorySpaceId"] = "space-test",
+                ["newKey"] = "preference.language",
+                ["newValue"] = "zh-Hans",
+                ["reason"] = "用户更新偏好。",
+            }),
+            new PermissionEnvelope(["memory.supersede"], requiresHumanGate: true));
+
+        var result = await runtime.ExecuteStepAsync(step, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Succeeded, result.Status);
+        Assert.NotNull(module.LastMutation);
+        var mutation = Assert.IsType<SupersedeMemoryModuleMutation>(module.LastMutation!.Mutation);
+        Assert.Equal(new MemoryRecordId("record-old"), mutation.Command.OldRecordId);
+        Assert.Equal(new MemorySpaceId("space-test"), mutation.Command.MemorySpaceId);
+        Assert.Equal("preference.language", mutation.Command.NewKey);
+        Assert.Equal("zh-Hans", mutation.Command.NewValue.StringValue);
+        Assert.Equal("用户更新偏好。", mutation.Command.Reason);
+    }
+
+    [Fact]
+    public async Task ExecuteStepAsync_ShouldFailClosedWhenMemoryModuleNotBound()
+    {
+        await using var runtime = new TianShuExecutionRuntime();
+        var context = CreateContext(SideEffectLevel.ReadOnly);
+        var step = CreateMemoryModuleStep(
+            "memory-retrieve-unbound",
+            SideEffectLevel.ReadOnly,
+            "memory.retrieve",
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["queryText"] = "architecture",
+            }),
+            new PermissionEnvelope(["memory.retrieve"], requiresHumanGate: false));
+
+        var result = await runtime.ExecuteStepAsync(step, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Blocked, result.Status);
+        Assert.Equal("memory_module_not_bound", result.Failure?.Code);
+    }
+
+    [Fact]
+    public async Task ExecuteStepAsync_ShouldFailClosedForInvalidMemorySupersedePayload()
+    {
+        var module = new RecordingMemoryModule("memory.identity");
+        await using var runtime = new TianShuExecutionRuntime(new ExecutionRuntimeStepBindingRegistry(
+            memoryModules: new Dictionary<string, IMemoryModule>(StringComparer.Ordinal)
+            {
+                [module.Descriptor.ModuleId] = module,
+            }));
+        var context = CreateContext(
+            SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-memory-invalid")]);
+        var step = CreateMemoryModuleStep(
+            "memory-supersede-invalid",
+            SideEffectLevel.ExternalMutation,
+            "memory.supersede",
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["oldRecordId"] = "record-old",
+                ["memorySpaceId"] = "space-test",
+                ["newValue"] = "zh-Hans",
+            }),
+            new PermissionEnvelope(["memory.supersede"], requiresHumanGate: true));
+
+        var result = await runtime.ExecuteStepAsync(step, context, CancellationToken.None);
+
+        Assert.Equal(RuntimeStepResultStatus.Blocked, result.Status);
+        Assert.Equal("memory_supersede_payload_invalid", result.Failure?.Code);
+        Assert.Null(module.LastMutation);
     }
 
     [Fact]
@@ -956,6 +1582,194 @@ public sealed class RuntimeStepExecutionTests
             OutputContract,
             TracePolicy);
 
+    private static TianShuExecutionRuntime CreateShellRuntime()
+        => new(new ExecutionRuntimeStepBindingRegistry(
+            tools: KernelRuntimeTurnLoopComposition.CreateTools(includeShell: true)));
+
+    private static ExecutionRuntimeContext CreateApprovedShellContext(string workingDirectory)
+        => CreateContext(
+            SideEffectLevel.HostMutation,
+            allowedToolIds: ["shell_command"],
+            requiresHumanGate: true,
+            approvalIds: [new ApprovalId("approval-shell-001")],
+            workingDirectory: workingDirectory);
+
+    private static ExecutionPlan CreateShellPlan(ToolInvocationStep step)
+        => new(
+            $"plan-{step.StepId}",
+            SourceGraphId,
+            SourceIntentId,
+            new RuntimeStep[] { step },
+            new ExecutionPlanPolicy(stopOnFailure: true),
+            TracePolicy);
+
+    private static ToolInvocationStep CreateShellStep(string stepId, StructuredValue input)
+    {
+        var permission = new PermissionEnvelope(["tool.shell.command"], requiresHumanGate: true);
+        var sideEffect = new SideEffectProfile(
+            SideEffectLevel.HostMutation,
+            ["command", "process", "workspace"],
+            reversible: false,
+            requiresAudit: true);
+        return new ToolInvocationStep(
+            stepId,
+            SourceIntentId,
+            SourceGraphId,
+            SourceStageId,
+            SourceKernelOperationId,
+            "shell_command",
+            new ToolInvocationEnvelope(
+                new CallId($"call-{stepId}"),
+                "shell_command",
+                "shell_command",
+                input,
+                permission,
+                sideEffect),
+            permission,
+            sideEffect,
+            Budget,
+            OutputContract,
+            TracePolicy);
+    }
+
+    private static ToolInvocationStep CreateMcpResourceStep(string stepId)
+    {
+        var permission = new PermissionEnvelope(["mcp.resource.read"], requiresHumanGate: false);
+        var sideEffect = new SideEffectProfile(
+            SideEffectLevel.ReadOnly,
+            ["mcp-resource"],
+            reversible: true,
+            requiresAudit: true);
+        return new ToolInvocationStep(
+            stepId,
+            SourceIntentId,
+            SourceGraphId,
+            SourceStageId,
+            SourceKernelOperationId,
+            "list_mcp_resources",
+            new ToolInvocationEnvelope(
+                new CallId($"call-{stepId}"),
+                "list_mcp_resources",
+                "list_resources",
+                StructuredValue.FromPlainObject(new Dictionary<string, object?>
+                {
+                    ["server"] = "docs",
+                }),
+                permission,
+                sideEffect),
+            permission,
+            sideEffect,
+            Budget,
+            OutputContract,
+            TracePolicy);
+    }
+
+    private static ToolInvocationStep CreateMcpToolStep(
+        string stepId,
+        SideEffectLevel sideEffectLevel = SideEffectLevel.ExternalMutation,
+        bool requiresHumanGate = true)
+    {
+        var permission = new PermissionEnvelope(["mcp.docs.search"], requiresHumanGate: requiresHumanGate);
+        var sideEffect = new SideEffectProfile(
+            sideEffectLevel,
+            sideEffectLevel <= SideEffectLevel.ReadOnly ? ["mcp-resource"] : ["mcp-tool", "remote"],
+            reversible: sideEffectLevel <= SideEffectLevel.ReadOnly,
+            requiresAudit: true);
+        return new ToolInvocationStep(
+            stepId,
+            SourceIntentId,
+            SourceGraphId,
+            SourceStageId,
+            SourceKernelOperationId,
+            "mcp.docs.search",
+            new ToolInvocationEnvelope(
+                new CallId($"call-{stepId}"),
+                "mcp.docs.search",
+                "invoke",
+                StructuredValue.FromPlainObject(new Dictionary<string, object?>
+                {
+                    ["query"] = "tianshu",
+                }),
+                permission,
+                sideEffect),
+            permission,
+            sideEffect,
+            Budget,
+            OutputContract,
+            TracePolicy);
+    }
+
+    private static TianShuMcpToolDescriptor CreateMcpToolDescriptor()
+        => new(
+            "docs",
+            "search",
+            "mcp.docs.search",
+            "Search Docs",
+            "Searches the configured docs MCP server.",
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                additionalProperties = false,
+                properties = new
+                {
+                    query = new { type = "string" },
+                },
+                required = new[] { "query" },
+            }),
+            sideEffectLevel: SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true,
+            requiredScopes: ["mcp.docs.search"]);
+
+    private static StructuredValue CreateShellInput(
+        string command,
+        string? workdir = null,
+        int? timeoutMs = null,
+        IReadOnlyDictionary<string, object?>? env = null)
+    {
+        var input = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["command"] = command,
+        };
+        if (workdir is not null)
+        {
+            input["workdir"] = workdir;
+        }
+
+        if (timeoutMs is not null)
+        {
+            input["timeout_ms"] = timeoutMs.Value;
+        }
+
+        if (env is not null)
+        {
+            input["env"] = env;
+        }
+
+        return StructuredValue.FromPlainObject(input);
+    }
+
+    private static StructuredValue GetSingleToolStreamPayload(RuntimeStepResult stepResult)
+    {
+        var toolResult = Assert.Single(stepResult.Output!.GetProperty("toolResults").Items);
+        var streamItem = Assert.Single(toolResult.GetProperty("output").GetProperty("streamItems").Items);
+        return streamItem.GetProperty("payload");
+    }
+
+    private static string SuccessfulShellCommand()
+        => OperatingSystem.IsWindows()
+            ? "Write-Output 'shell-ok'"
+            : "printf 'shell-ok\\n'";
+
+    private static string SleepShellCommand()
+        => OperatingSystem.IsWindows()
+            ? "Start-Sleep -Seconds 2"
+            : "sleep 2";
+
+    private static string LargeOutputShellCommand()
+        => OperatingSystem.IsWindows()
+            ? "$s = 'x' * 13050; Write-Output $s"
+            : "head -c 13050 /dev/zero | tr '\\0' x";
+
     private static ArtifactStep CreateArtifactStep(string stepId, string operationName, SideEffectLevel sideEffectLevel)
         => new(
             stepId,
@@ -971,7 +1785,12 @@ public sealed class RuntimeStepExecutionTests
             OutputContract,
             TracePolicy);
 
-    private static ModuleCapabilityStep CreateMemoryModuleStep(string stepId, SideEffectLevel sideEffectLevel)
+    private static ModuleCapabilityStep CreateMemoryModuleStep(
+        string stepId,
+        SideEffectLevel sideEffectLevel,
+        string capabilityId = "memory.identity.filter",
+        StructuredValue? input = null,
+        PermissionEnvelope? permission = null)
         => new(
             stepId,
             SourceIntentId,
@@ -979,9 +1798,9 @@ public sealed class RuntimeStepExecutionTests
             SourceStageId,
             SourceKernelOperationId,
             "memory.identity",
-            "memory.identity.filter",
-            Payload("memory"),
-            Permission,
+            capabilityId,
+            input ?? Payload("memory"),
+            permission ?? Permission,
             SideEffect(sideEffectLevel),
             Budget,
             OutputContract,
@@ -1042,7 +1861,8 @@ public sealed class RuntimeStepExecutionTests
         IReadOnlyList<string>? allowedToolIds = null,
         IReadOnlyList<string>? allowedModuleIds = null,
         bool requiresHumanGate = false,
-        IReadOnlyList<ApprovalId>? approvalIds = null)
+        IReadOnlyList<ApprovalId>? approvalIds = null,
+        string? workingDirectory = null)
         => new(
             new ExecutionId("execution-test"),
             new KernelRunId("kernel-run-test"),
@@ -1052,7 +1872,8 @@ public sealed class RuntimeStepExecutionTests
                 allowedModuleIds: allowedModuleIds ?? new[] { "provider.module", "module.test", "memory.identity", "artifact.state.projection", "diagnostics" },
                 maxSideEffectLevel: maxSideEffectLevel,
                 requiresHumanGate: requiresHumanGate,
-                approvalIds: approvalIds));
+                approvalIds: approvalIds),
+            workingDirectory);
 
     private static SideEffectProfile SideEffect(SideEffectLevel level)
         => new(level, affectedResources: new[] { "runtime-step-test" }, reversible: true, requiresAudit: true);
@@ -1189,15 +2010,32 @@ public sealed class RuntimeStepExecutionTests
                         "Filter memory",
                         permission: Permission,
                         sideEffects: SideEffect(SideEffectLevel.ReadOnly)),
+                    new ModuleCapabilityDescriptor(
+                        "memory.retrieve",
+                        "Retrieve memory",
+                        permission: new PermissionEnvelope(["memory.retrieve"], requiresHumanGate: false),
+                        sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly, ["memory"], reversible: true, requiresAudit: true)),
+                    new ModuleCapabilityDescriptor(
+                        "memory.form",
+                        "Form memory",
+                        permission: new PermissionEnvelope(["memory.form"], requiresHumanGate: true),
+                        sideEffects: new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false, requiresAudit: true)),
+                    new ModuleCapabilityDescriptor(
+                        "memory.supersede",
+                        "Supersede memory",
+                        permission: new PermissionEnvelope(["memory.supersede"], requiresHumanGate: true),
+                        sideEffects: new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false, requiresAudit: true)),
                 ],
-                permission: Permission,
-                sideEffects: SideEffect(SideEffectLevel.ReadOnly),
+                permission: new PermissionEnvelope(["memory"], requiresHumanGate: false),
+                sideEffects: new SideEffectProfile(SideEffectLevel.ExternalMutation, ["memory"], reversible: false, requiresAudit: true),
                 trustLevel: ModuleTrustLevel.BuiltIn);
         }
 
         public ModuleDescriptor Descriptor { get; }
 
         public MemoryModuleQueryInvocation? LastQuery { get; private set; }
+
+        public MemoryModuleMutationInvocation? LastMutation { get; private set; }
 
         public ValueTask<ModuleSmokeCheckResult> CheckAsync(CancellationToken cancellationToken)
             => ValueTask.FromResult(new ModuleSmokeCheckResult(Descriptor.ModuleId, true, ModuleHealthStatus.Healthy));
@@ -1213,7 +2051,10 @@ public sealed class RuntimeStepExecutionTests
         public ValueTask<MemoryMutationResult> MutateAsync(
             MemoryModuleMutationInvocation invocation,
             CancellationToken cancellationToken)
-            => ValueTask.FromResult(new MemoryMutationResult(true, Effect: MemoryMutationEffect.None));
+        {
+            LastMutation = invocation;
+            return ValueTask.FromResult(new MemoryMutationResult(true, Effect: MemoryMutationEffect.None));
+        }
     }
 
     private sealed class RecordingArtifactModule : IArtifactStateProjectionModule
@@ -1366,6 +2207,113 @@ public sealed class RuntimeStepExecutionTests
         {
             Events.Add(metricsEvent);
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TempRuntimeWorkspace : IDisposable
+    {
+        public TempRuntimeWorkspace()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "tianshu-runtime-shell-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+
+    private sealed class RecordingMcpServices : ITianShuMcpResourceToolServices, ITianShuMcpToolServices
+    {
+        private readonly Func<TianShuMcpToolRequest, Task<TianShuMcpToolResult>>? invokeMcpTool;
+
+        public RecordingMcpServices(Func<TianShuMcpToolRequest, Task<TianShuMcpToolResult>>? invokeMcpTool = null)
+        {
+            this.invokeMcpTool = invokeMcpTool;
+        }
+
+        public int ListResourcesCount { get; private set; }
+
+        public int InvokeMcpToolCount { get; private set; }
+
+        public TianShuMcpToolRequest? LastMcpToolRequest { get; private set; }
+
+        public Task<TianShuMcpListResourcesResult> ListResourcesAsync(string? server, string? cursor, CancellationToken cancellationToken)
+        {
+            _ = cursor;
+            _ = cancellationToken;
+            ListResourcesCount++;
+            var serverId = server ?? "docs";
+            return Task.FromResult(new TianShuMcpListResourcesResult(
+                serverId,
+                [new TianShuMcpResourceEntry(serverId, JsonSerializer.SerializeToElement(new
+                {
+                    uri = "docs://readme",
+                    name = "README",
+                    mimeType = "text/markdown",
+                }))],
+                NextCursor: null));
+        }
+
+        public Task<TianShuMcpListResourceTemplatesResult> ListResourceTemplatesAsync(string? server, string? cursor, CancellationToken cancellationToken)
+        {
+            _ = cursor;
+            _ = cancellationToken;
+            var serverId = server ?? "docs";
+            return Task.FromResult(new TianShuMcpListResourceTemplatesResult(
+                serverId,
+                [new TianShuMcpResourceTemplateEntry(serverId, JsonSerializer.SerializeToElement(new
+                {
+                    uriTemplate = "docs://{name}",
+                    name = "Docs Template",
+                }))],
+                NextCursor: null));
+        }
+
+        public Task<TianShuMcpReadResourceResult> ReadResourceAsync(string server, string uri, CancellationToken cancellationToken)
+        {
+            _ = cancellationToken;
+            return Task.FromResult(new TianShuMcpReadResourceResult(
+                server,
+                uri,
+                JsonSerializer.SerializeToElement(new
+                {
+                    contents = new[]
+                    {
+                        new
+                        {
+                            uri,
+                            mimeType = "text/plain",
+                            text = "hello",
+                        },
+                    },
+                })));
+        }
+
+        public Task<TianShuMcpToolResult> InvokeMcpToolAsync(TianShuMcpToolRequest request, CancellationToken cancellationToken)
+        {
+            _ = cancellationToken;
+            InvokeMcpToolCount++;
+            LastMcpToolRequest = request;
+            if (invokeMcpTool is not null)
+            {
+                return invokeMcpTool(request);
+            }
+
+            return Task.FromResult(new TianShuMcpToolResult(
+                true,
+                "search-ok",
+                StructuredValue.FromPlainObject(new Dictionary<string, object?>
+                {
+                    ["text"] = "search-ok",
+                    ["resultCount"] = 1,
+                })));
         }
     }
 

@@ -583,6 +583,24 @@ internal static class CliCommandParser
                 continue;
             }
 
+            if (string.Equals(arg, "--enable-shell", StringComparison.OrdinalIgnoreCase))
+            {
+                options.EnableShell = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--enable-mcp", StringComparison.OrdinalIgnoreCase))
+            {
+                options.EnableMcp = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--enable-memory", StringComparison.OrdinalIgnoreCase))
+            {
+                options.EnableMemory = true;
+                continue;
+            }
+
             if (!TryReadValue(args, ref index, arg, out var value, out var error))
             {
                 return CliCommandParseResult.Failure(error);
@@ -658,6 +676,11 @@ internal static class CliCommandParser
         }
 
         options.Mode = parsedMode;
+        if (options.EnableShell && !options.ApproveAll)
+        {
+            return CliCommandParseResult.Failure("--enable-shell 需要同时启用 --approve-all，作为本轮 shell HostMutation 授权边界。");
+        }
+
         if (!ValidateResumeOptions(options, out var validationError))
         {
             return CliCommandParseResult.Failure(validationError);

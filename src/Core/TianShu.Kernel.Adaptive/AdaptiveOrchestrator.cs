@@ -10,22 +10,33 @@ namespace TianShu.Kernel.Adaptive;
 /// </summary>
 public sealed class AdaptiveOrchestrator : IAdaptiveOrchestrator
 {
-    private readonly IKernelTool composeStageGraphTool;
+    private readonly IAdaptiveStageGraphCandidateGenerator candidateGenerator;
     private readonly IKernelTool reviseStageGraphTool;
 
     public AdaptiveOrchestrator(IKernelTool? composeStageGraphTool = null, IKernelTool? reviseStageGraphTool = null)
+        : this(candidateGenerator: null, composeStageGraphTool, reviseStageGraphTool)
     {
-        this.composeStageGraphTool = composeStageGraphTool ?? new ComposeStageGraphKernelTool();
+    }
+
+    public AdaptiveOrchestrator(IAdaptiveStageGraphCandidateGenerator candidateGenerator, IKernelTool? reviseStageGraphTool = null)
+        : this(candidateGenerator, composeStageGraphTool: null, reviseStageGraphTool)
+    {
+    }
+
+    private AdaptiveOrchestrator(
+        IAdaptiveStageGraphCandidateGenerator? candidateGenerator = null,
+        IKernelTool? composeStageGraphTool = null,
+        IKernelTool? reviseStageGraphTool = null)
+    {
+        this.candidateGenerator = candidateGenerator ?? new DefaultAdaptiveStageGraphCandidateGenerator(composeStageGraphTool);
         this.reviseStageGraphTool = reviseStageGraphTool ?? new ReviseStageGraphKernelTool();
     }
 
     public async Task<KernelProposalSet> ProposeAsync(CoreIntent intent, KernelRunState state, KernelRunOptions options, CancellationToken cancellationToken = default)
     {
-        var result = await composeStageGraphTool.InvokeKernelAsync(
-            new KernelToolInvocation(intent, state, options),
-            cancellationToken).ConfigureAwait(false);
+        var proposals = await candidateGenerator.GenerateCandidatesAsync(intent, state, options, cancellationToken).ConfigureAwait(false);
 
-        return new KernelProposalSet(result.Proposal is null ? Array.Empty<KernelProposal>() : new[] { result.Proposal }, "adaptive.default.compose_stage_graph");
+        return new KernelProposalSet(proposals, "adaptive.default.compose_stage_graph.candidates");
     }
 
     public async Task<KernelProposalSet> ReviseAsync(KernelValidationResult validationResult, KernelRunState state, KernelRunOptions options, CancellationToken cancellationToken = default)

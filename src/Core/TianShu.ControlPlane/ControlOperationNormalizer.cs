@@ -114,7 +114,7 @@ public sealed class ControlOperationNormalizer
         CoreIntent intent;
         try
         {
-            if (HasPrefix(operationName, "turn."))
+            if (HasPrefix(operationName, "turn.") || string.Equals(operationName, "remote.submit_message", StringComparison.Ordinal))
             {
                 intent = new TurnIntent(
                     intentId,
@@ -122,7 +122,7 @@ public sealed class ControlOperationNormalizer
                     governance,
                     ReadRequiredString(request.Payload, "user_input_ref", "userInputRef"));
             }
-            else if (HasPrefix(operationName, "resume."))
+            else if (HasPrefix(operationName, "resume.") || string.Equals(operationName, "remote.resume", StringComparison.Ordinal))
             {
                 intent = new ResumeIntent(
                     intentId,
@@ -165,7 +165,7 @@ public sealed class ControlOperationNormalizer
                     governance,
                     ReadRequiredString(request.Payload, "context_scope_ref", "contextScopeRef"));
             }
-            else if (HasPrefix(operationName, "interrupt."))
+            else if (HasPrefix(operationName, "interrupt.") || string.Equals(operationName, "remote.interrupt", StringComparison.Ordinal))
             {
                 intent = new InterruptIntent(
                     intentId,
@@ -200,16 +200,22 @@ public sealed class ControlOperationNormalizer
             || string.Equals(operationName, "thread.read", StringComparison.Ordinal);
 
     private static bool IsCoreIntentOperation(string operationName)
-        => HasAnyPrefix(operationName, "turn.", "resume.", "recovery.", "evaluation.", "review.", "compact.", "compaction.", "interrupt.");
+        => HasAnyPrefix(operationName, "turn.", "resume.", "recovery.", "evaluation.", "review.", "compact.", "compaction.", "interrupt.")
+            || string.Equals(operationName, "remote.submit_message", StringComparison.Ordinal)
+            || string.Equals(operationName, "remote.interrupt", StringComparison.Ordinal)
+            || string.Equals(operationName, "remote.resume", StringComparison.Ordinal);
 
     private static bool IsGovernanceOperation(string operationName)
-        => HasAnyPrefix(operationName, "governance.", "approval.", "permission.", "policy.");
+        => HasAnyPrefix(operationName, "governance.", "approval.", "permission.", "policy.")
+            || string.Equals(operationName, "remote.approval_decision", StringComparison.Ordinal);
 
     private static bool IsStateOperation(string operationName)
         => HasAnyPrefix(operationName, "state.", "thread.", "workflow.");
 
     private static bool IsControlOperation(string operationName)
-        => HasAnyPrefix(operationName, "control.", "command.", "session.");
+        => HasAnyPrefix(operationName, "control.", "command.", "session.")
+            || string.Equals(operationName, "remote.steer", StringComparison.Ordinal)
+            || string.Equals(operationName, "remote.cancel_pending_operation", StringComparison.Ordinal);
 
     private static bool HasAnyPrefix(string value, params string[] prefixes)
         => prefixes.Any(prefix => HasPrefix(value, prefix));

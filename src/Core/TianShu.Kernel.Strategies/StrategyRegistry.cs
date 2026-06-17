@@ -4,12 +4,13 @@ using TianShu.Kernel.Abstractions;
 namespace TianShu.Kernel.Strategies;
 
 /// <summary>
-/// 进程内 Strategy registry 默认实现，管理 draft、validated、trial、promoted、deprecated 和 rolled_back。
-/// In-process default Strategy registry managing draft, validated, trial, promoted, deprecated, and rolled_back.
+/// 进程内 Strategy registry 默认实现，管理 candidate、trial、promoted、deprecated 和 rolled_back，并记录生命周期审计。
+/// In-process default Strategy registry managing candidate, trial, promoted, deprecated, and rolled_back with lifecycle audit records.
 /// </summary>
 public sealed class StrategyRegistry : IStrategyRegistry
 {
     private readonly Dictionary<StrategyId, StrategyRecord> strategies = new();
+    private readonly Dictionary<StrategyId, List<StrategyLifecycleAuditRecord>> auditRecords = new();
     private readonly List<StrategyRollbackRecord> rollbackRecords = new();
 
     public IReadOnlyList<StrategyRollbackRecord> RollbackRecords => rollbackRecords;
@@ -25,9 +26,17 @@ public sealed class StrategyRegistry : IStrategyRegistry
 
     public Task<IReadOnlyList<StrategyRecord>> ListCandidatesAsync(CoreIntentKind intentKind, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<StrategyRecord>>(strategies.Values
-            .Where(static item => item.LifecycleState is StrategyLifecycleState.Validated or StrategyLifecycleState.Trial or StrategyLifecycleState.Promoted)
+            .Where(static item => item.LifecycleState is StrategyLifecycleState.Candidate or StrategyLifecycleState.Validated or StrategyLifecycleState.Trial or StrategyLifecycleState.Promoted)
             .OrderByDescending(static item => item.UpdatedAt)
             .ToArray());
+
+    public Task<IReadOnlyList<StrategyLifecycleAuditRecord>> ListAuditRecordsAsync(
+        StrategyId strategyId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<StrategyLifecycleAuditRecord>>(
+            auditRecords.TryGetValue(strategyId, out var records)
+                ? records.OrderBy(static item => item.OccurredAt).ToArray()
+                : Array.Empty<StrategyLifecycleAuditRecord>());
 
     public Task<KernelValidationResult> ValidateTransitionAsync(
         StrategyRecord strategy,
@@ -42,7 +51,7 @@ public sealed class StrategyRegistry : IStrategyRegistry
             return Task.FromResult(Rejected("kernel.strategy.illegal_transition", $"Strategy 不能从 {strategy.LifecycleState} 转换到 {targetState}。"));
         }
 
-        if (targetState is StrategyLifecycleState.Validated or StrategyLifecycleState.Trial or StrategyLifecycleState.Promoted
+        if (targetState is StrategyLifecycleState.Candidate or StrategyLifecycleState.Validated or StrategyLifecycleState.Trial or StrategyLifecycleState.Promoted or StrategyLifecycleState.Deprecated or StrategyLifecycleState.RolledBack
             && (evidence is null || evidence.Count == 0))
         {
             return Task.FromResult(Rejected("kernel.strategy.missing_evidence", "Strategy lifecycle transition 必须包含 evidence。"));
@@ -67,6 +76,40 @@ public sealed class StrategyRegistry : IStrategyRegistry
         }
 
         return Task.FromResult(new KernelValidationResult(KernelValidationDecision.Approved));
+    }
+
+    public async Task<StrategyRecord> SaveCandidateAsync(
+        StrategyRecord strategy,
+        IReadOnlyList<StrategyTransitionEvidence> evidence,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(strategy);
+        if (strategy.LifecycleState != StrategyLifecycleState.Candidate)
+        {
+            throw new ArgumentException("SaveCandidateAsync 只接受 Candidate strategy。", nameof(strategy));
+        }
+
+        var validation = await ValidateTransitionAsync(
+            new StrategyRecord(strategy.StrategyId, strategy.Name, strategy.GraphId, StrategyLifecycleState.Draft),
+            StrategyLifecycleState.Candidate,
+            evidence,
+            cancellationToken).ConfigureAwait(false);
+        if (!validation.IsApproved)
+        {
+            throw new InvalidOperationException(validation.Issues.Count == 0 ? "Strategy candidate registration rejected." : validation.Issues[0].Message);
+        }
+
+        var audit = CreateAuditRecord(strategy.StrategyId, StrategyLifecycleState.Unspecified, StrategyLifecycleState.Candidate, evidence);
+        var stored = new StrategyRecord(
+            strategy.StrategyId,
+            strategy.Name,
+            strategy.GraphId,
+            StrategyLifecycleState.Candidate,
+            strategy.TransitionEvidence.Concat(evidence).ToArray(),
+            lifecycleAuditRecords: AppendAudit(strategy.StrategyId, audit));
+
+        strategies[strategy.StrategyId] = stored;
+        return stored;
     }
 
     public Task<StrategyRecord> SaveDraftAsync(StrategyRecord strategy, CancellationToken cancellationToken = default)
@@ -103,7 +146,10 @@ public sealed class StrategyRegistry : IStrategyRegistry
             strategy.Name,
             strategy.GraphId,
             targetState,
-            strategy.TransitionEvidence.Concat(evidence ?? Array.Empty<StrategyTransitionEvidence>()).ToArray());
+            strategy.TransitionEvidence.Concat(evidence ?? Array.Empty<StrategyTransitionEvidence>()).ToArray(),
+            lifecycleAuditRecords: AppendAudit(
+                strategyId,
+                CreateAuditRecord(strategyId, strategy.LifecycleState, targetState, evidence ?? Array.Empty<StrategyTransitionEvidence>())));
 
         strategies[strategyId] = updated;
         if (targetState == StrategyLifecycleState.RolledBack)
@@ -117,7 +163,10 @@ public sealed class StrategyRegistry : IStrategyRegistry
     private static bool IsAllowedTransition(StrategyLifecycleState current, StrategyLifecycleState target)
         => (current, target) switch
         {
+            (StrategyLifecycleState.Draft, StrategyLifecycleState.Candidate) => true,
             (StrategyLifecycleState.Draft, StrategyLifecycleState.Validated) => true,
+            (StrategyLifecycleState.Validated, StrategyLifecycleState.Candidate) => true,
+            (StrategyLifecycleState.Candidate, StrategyLifecycleState.Trial) => true,
             (StrategyLifecycleState.Validated, StrategyLifecycleState.Trial) => true,
             (StrategyLifecycleState.Trial, StrategyLifecycleState.Promoted) => true,
             (StrategyLifecycleState.Promoted, StrategyLifecycleState.Deprecated) => true,
@@ -129,6 +178,36 @@ public sealed class StrategyRegistry : IStrategyRegistry
         => new(
             KernelValidationDecision.Rejected,
             new[] { new KernelValidationIssue(code, message) });
+
+    private IReadOnlyList<StrategyLifecycleAuditRecord> AppendAudit(StrategyId strategyId, StrategyLifecycleAuditRecord record)
+    {
+        if (!auditRecords.TryGetValue(strategyId, out var records))
+        {
+            records = [];
+            auditRecords[strategyId] = records;
+        }
+
+        records.Add(record);
+        return records.ToArray();
+    }
+
+    private static StrategyLifecycleAuditRecord CreateAuditRecord(
+        StrategyId strategyId,
+        StrategyLifecycleState previousState,
+        StrategyLifecycleState targetState,
+        IReadOnlyList<StrategyTransitionEvidence> evidence)
+    {
+        var evidenceArray = evidence ?? Array.Empty<StrategyTransitionEvidence>();
+        return new StrategyLifecycleAuditRecord(
+            $"strategy.lifecycle.{strategyId.Value}.{previousState.ToString().ToLowerInvariant()}.{targetState.ToString().ToLowerInvariant()}.{Guid.NewGuid():N}",
+            strategyId,
+            previousState,
+            targetState,
+            evidenceArray.Select(static item => item.EvidenceRef).ToArray(),
+            evidenceArray.SelectMany(static item => item.MetricRefs).Distinct(StringComparer.Ordinal).ToArray(),
+            humanApproved: evidenceArray.Any(static item => item.HumanApproved),
+            reasonRef: evidenceArray.FirstOrDefault()?.EvidenceRef);
+    }
 }
 
 /// <summary>

@@ -98,6 +98,7 @@ public sealed partial class TianShuExecutionRuntime : IExecutionRuntimeDiagnosti
     private readonly IExecutionRuntimeProviderBridge providerBridge;
     private readonly IExecutionRuntimeToolBridge toolBridge;
     private readonly IExecutionRuntimeSubAgentModuleBridge subAgentModuleBridge;
+    private readonly IExecutionRuntimeMemoryModuleBridge memoryModuleBridge;
     private readonly ConcurrentDictionary<string, string> threadProjectionTitles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ThreadRuntimeStatusProjection> threadProjectionStatuses = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ThreadTokenUsageProjection> threadProjectionTokenUsage = new(StringComparer.Ordinal);
@@ -218,6 +219,7 @@ public sealed partial class TianShuExecutionRuntime : IExecutionRuntimeDiagnosti
         providerBridge = new ExecutionRuntimeProviderBridge(metricsSink);
         toolBridge = new ExecutionRuntimeToolBridge(metricsSink);
         subAgentModuleBridge = new ExecutionRuntimeSubAgentModuleBridge();
+        memoryModuleBridge = new ExecutionRuntimeMemoryModuleBridge();
         workflowPlane = new InMemoryTianShuWorkflowPlane(collaborationPlane);
         ApplyProviderRuntimeState(ProviderRuntimeBootstrapRegistry.CreateRuntimeState(null));
     }

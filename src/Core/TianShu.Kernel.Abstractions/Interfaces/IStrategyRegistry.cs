@@ -14,9 +14,18 @@ public interface IStrategyRegistry
 
     Task<IReadOnlyList<StrategyRecord>> ListCandidatesAsync(CoreIntentKind intentKind, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<StrategyLifecycleAuditRecord>> ListAuditRecordsAsync(
+        StrategyId strategyId,
+        CancellationToken cancellationToken = default);
+
     Task<KernelValidationResult> ValidateTransitionAsync(
         StrategyRecord strategy,
         StrategyLifecycleState targetState,
+        IReadOnlyList<StrategyTransitionEvidence> evidence,
+        CancellationToken cancellationToken = default);
+
+    Task<StrategyRecord> SaveCandidateAsync(
+        StrategyRecord strategy,
         IReadOnlyList<StrategyTransitionEvidence> evidence,
         CancellationToken cancellationToken = default);
 

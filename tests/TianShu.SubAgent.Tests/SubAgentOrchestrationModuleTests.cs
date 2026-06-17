@@ -29,6 +29,7 @@ public sealed class SubAgentOrchestrationModuleTests
         Assert.Equal(SubAgentRunStatus.Completed, result.Status);
         Assert.Equal("child answer", result.ResultText);
         Assert.Equal("trace://child", result.ReplaySummaryRef);
+        Assert.Equal("artifact://child/report", Assert.Single(result.ArtifactRefs));
         Assert.NotNull(loop.LastIntent);
         var childIntent = Assert.IsType<TurnIntent>(loop.LastIntent);
         Assert.Equal("session-parent", childIntent.Subject.SessionId.Value);
@@ -40,6 +41,7 @@ public sealed class SubAgentOrchestrationModuleTests
         Assert.DoesNotContain("spawn_agent", childIntent.Governance.AllowedToolIds);
         Assert.Contains("read_file", childIntent.Governance.AllowedToolIds);
         Assert.DoesNotContain("write", childIntent.Governance.AllowedToolIds);
+        Assert.Equal(["policy-parent"], childIntent.Governance.PolicyIds);
         Assert.Contains(childIntent.Governance.ApprovalIds, approval => approval.Value == "approval-parent");
         Assert.NotNull(loop.LastOptions);
         Assert.Equal("run-child", loop.LastOptions!.RuntimeContext.KernelRunId.Value);
@@ -92,6 +94,60 @@ public sealed class SubAgentOrchestrationModuleTests
     }
 
     [Fact]
+    public async Task SpawnAsync_ShouldPropagateParentGovernanceHumanGateWorkspaceAndTraceMetadata()
+    {
+        var loop = new RecordingKernelRuntimeExecutionLoop();
+        var module = new SubAgentOrchestrationModule(loop);
+        var parentGovernance = CreateParentGovernance(requiresHumanGate: true);
+        var request = CreateRequest();
+        var childLineage = request.ParentLineage.Descend("run-child", siblingIndex: 0);
+        var parentMetadata = new MetadataBag(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+        {
+            ["subAgent.parentTracePolicy"] = StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["enabled"] = true,
+                ["requireDiagnosticsRef"] = true,
+                ["requireRuntimeTraceRef"] = true,
+                ["requiredEventKinds"] = new[] { "subagent.spawn" },
+            }),
+            ["subAgent.parentRuntimeStepBudget"] = StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["tokenBudget"] = 1000,
+                ["timeBudgetMs"] = 30000,
+                ["costBudget"] = 0,
+                ["retryBudget"] = 1,
+                ["toolCallBudget"] = 2,
+            }),
+        });
+
+        var result = await module.SpawnAsync(
+            request,
+            childLineage,
+            new SubAgentSpawnQuota(1, 8, 32, 0),
+            CreateInvocationContext(
+                parentGovernance,
+                new PermissionEnvelope(["module.sub_agent"], requiresHumanGate: true, reason: "parent approved subtree"),
+                parentMetadata),
+            CancellationToken.None);
+
+        Assert.Equal(SubAgentRunStatus.Completed, result.Status);
+        var childIntent = Assert.IsType<TurnIntent>(loop.LastIntent);
+        Assert.True(childIntent.Governance.RequiresHumanGate);
+        Assert.Contains(childIntent.Governance.ApprovalIds, approval => approval.Value == "approval-parent");
+        Assert.NotNull(loop.LastOptions);
+        Assert.True(loop.LastOptions!.KernelOptions.RequireHumanGate);
+        Assert.Equal("D:/Work/TianShu", loop.LastOptions.RuntimeContext.WorkingDirectory);
+        var runtimeMetadata = loop.LastOptions.RuntimeContext.Metadata;
+        Assert.Equal("governance-parent", runtimeMetadata.Entries["subAgent.parentGovernance"].GetProperty("envelopeId").GetString());
+        Assert.True(runtimeMetadata.Entries["subAgent.childGovernance"].GetProperty("requiresHumanGate").GetBoolean());
+        Assert.Equal("policy-parent", Assert.Single(runtimeMetadata.Entries["subAgent.childGovernance"].GetProperty("policyIds").Items).GetString());
+        Assert.Equal("HostMutation", runtimeMetadata.Entries["subAgent.parentSideEffectLevel"].GetString());
+        Assert.True(runtimeMetadata.TryGetValue("subAgent.parentTracePolicy", out _));
+        Assert.True(runtimeMetadata.TryGetValue("subAgent.parentRuntimeStepBudget", out _));
+        Assert.Equal("D:/Work/TianShu", runtimeMetadata.Entries["subAgent.parentWorkingDirectory"].GetString());
+    }
+
+    [Fact]
     public void SubAgentGovernanceNarrowing_ShouldNeverGrantToolsModulesOrApprovalsOutsideParent()
     {
         var parent = CreateParentGovernance();
@@ -139,6 +195,22 @@ public sealed class SubAgentOrchestrationModuleTests
     }
 
     [Fact]
+    public void SubAgentGovernanceNarrowing_ShouldInheritParentPoliciesWhenRequestOmitsPolicies()
+    {
+        var parent = CreateParentGovernance();
+        var requested = new GovernanceEnvelope(
+            "governance-requested",
+            allowedToolIds: ["read_file"],
+            allowedModuleIds: ["provider.default"],
+            maxSideEffectLevel: SideEffectLevel.ReadOnly,
+            requiresHumanGate: false);
+
+        var narrowed = SubAgentGovernanceNarrowing.Narrow(parent, requested, "run-child", requiresHumanGate: false);
+
+        Assert.Equal(["policy-parent"], narrowed.PolicyIds);
+    }
+
+    [Fact]
     public void SubAgentOrchestrationModule_SourceShouldOnlyConsumeRuntimeLoop()
     {
         var source = File.ReadAllText(FindRepoFile("src/Core/TianShu.SubAgent/SubAgentOrchestrationModule.cs"));
@@ -168,28 +240,32 @@ public sealed class SubAgentOrchestrationModuleTests
             new KernelBudget(tokenBudget: 1000, timeBudgetMs: 30000, costBudget: 0, retryBudget: 1, toolCallBudget: 2),
             requiresHumanGate: false);
 
-    private static SubAgentModuleInvocationContext CreateInvocationContext()
+    private static SubAgentModuleInvocationContext CreateInvocationContext(
+        GovernanceEnvelope? governance = null,
+        PermissionEnvelope? permission = null,
+        MetadataBag? metadata = null)
         => new(
             "step-subagent",
             "intent-parent",
             "graph.turn.default",
             "stage.tool-exec",
             "operation-tool-exec",
-            new PermissionEnvelope(["module.sub_agent"], requiresHumanGate: false, reason: "test"),
+            permission ?? new PermissionEnvelope(["module.sub_agent"], requiresHumanGate: false, reason: "test"),
             new SideEffectProfile(SideEffectLevel.HostMutation, ["subagent"], reversible: false, requiresAudit: true),
             "execution-parent",
             "run-parent",
-            CreateParentGovernance(),
-            "D:/Work/TianShu");
+            governance ?? CreateParentGovernance(),
+            "D:/Work/TianShu",
+            metadata);
 
-    private static GovernanceEnvelope CreateParentGovernance()
+    private static GovernanceEnvelope CreateParentGovernance(bool requiresHumanGate = false)
         => new(
             "governance-parent",
             policyIds: ["policy-parent"],
             allowedToolIds: ["read_file", "spawn_agent"],
             allowedModuleIds: ["provider.default", "module.sub_agent"],
             maxSideEffectLevel: SideEffectLevel.HostMutation,
-            requiresHumanGate: false,
+            requiresHumanGate: requiresHumanGate,
             approvalIds: [new ApprovalId("approval-parent")]);
 
     private static KernelRuntimeExecutionResult CreateCompletedResult(CoreIntent intent, KernelRuntimeExecutionOptions options)
@@ -207,6 +283,7 @@ public sealed class SubAgentOrchestrationModuleTests
                     StructuredValue.FromPlainObject(new Dictionary<string, object?>
                     {
                         ["assistantText"] = "child answer",
+                        ["artifactRefs"] = new[] { "artifact://child/report" },
                     })),
             ],
             diagnosticsRef: "diagnostics://child",

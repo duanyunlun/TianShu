@@ -373,6 +373,152 @@ public sealed class ToolContractTests
     }
 
     [Fact]
+    public void ToolModuleAccessValidator_ShouldCreateAccessDescriptorWhenManifestMatchesDescriptorsAndGovernance()
+    {
+        var descriptor = ReadOnlyDescriptor();
+        var manifest = Manifest([BindingFromDescriptor(descriptor)]);
+        var governance = Governance(
+            allowedToolIds: [descriptor.ToolId],
+            maxSideEffectLevel: SideEffectLevel.ReadOnly,
+            requiresHumanGate: false);
+
+        var result = ToolModuleAccessValidator.Validate(manifest, [descriptor], governance);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
+        Assert.NotNull(result.Access);
+        Assert.Equal("builtin.filesystem", result.Access!.Manifest.ModuleId);
+        Assert.Equal("read_file", Assert.Single(result.Access.Tools).ToolId);
+        Assert.Equal("tool-access", result.Access.Governance.EnvelopeId);
+    }
+
+    [Fact]
+    public void ToolModuleAccessValidator_ShouldFailClosedWhenToolSchemaMissing()
+    {
+        var descriptor = new ToolDescriptor(
+            "custom_tool",
+            "Custom Tool",
+            "Missing schema.",
+            permissions: new PermissionDeclaration(["tool.custom"], requiresHumanGate: false),
+            sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly));
+        var manifest = Manifest(
+        [
+            new ToolModuleToolBinding(
+                descriptor.ToolId,
+                descriptor.DisplayName,
+                descriptor.Description,
+                permission: descriptor.Permissions,
+                sideEffects: descriptor.SideEffects),
+        ]);
+
+        var result = ToolModuleAccessValidator.Validate(
+            manifest,
+            [descriptor],
+            Governance(allowedToolIds: [descriptor.ToolId], maxSideEffectLevel: SideEffectLevel.ReadOnly, requiresHumanGate: false));
+
+        Assert.False(result.IsValid);
+        Assert.Null(result.Access);
+        Assert.Contains(result.Issues, static issue => issue.Code == "tool_access.schema_missing");
+    }
+
+    [Fact]
+    public void ToolModuleAccessValidator_ShouldFailClosedWhenGovernanceDeniesTool()
+    {
+        var descriptor = ReadOnlyDescriptor();
+        var manifest = Manifest([BindingFromDescriptor(descriptor)]);
+
+        var result = ToolModuleAccessValidator.Validate(
+            manifest,
+            [descriptor],
+            Governance(allowedToolIds: ["other_tool"], maxSideEffectLevel: SideEffectLevel.ReadOnly, requiresHumanGate: false));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, static issue => issue.Code == "tool_access.governance_denied");
+    }
+
+    [Fact]
+    public void ToolModuleAccessValidator_ShouldFailClosedWhenHumanGateIsWeakened()
+    {
+        var descriptor = WriteDescriptor();
+        var manifest = Manifest(
+        [
+            new ToolModuleToolBinding(
+                descriptor.ToolId,
+                descriptor.DisplayName,
+                descriptor.Description,
+                inputSchema: descriptor.InputSchema,
+                permission: new PermissionDeclaration(["tool.write"], requiresHumanGate: false),
+                sideEffects: descriptor.SideEffects,
+                approvalRequirement: descriptor.ApprovalRequirement,
+                requiresHumanGate: false),
+        ]);
+
+        var result = ToolModuleAccessValidator.Validate(
+            manifest,
+            [descriptor],
+            Governance(allowedToolIds: [descriptor.ToolId], maxSideEffectLevel: SideEffectLevel.WorkspaceWrite, requiresHumanGate: true));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, static issue => issue.Code == "tool_access.human_gate_weakened");
+    }
+
+    [Fact]
+    public void ToolModuleAccessValidator_ShouldFailClosedWhenManifestWeakensSideEffect()
+    {
+        var descriptor = WriteDescriptor();
+        var manifest = Manifest(
+        [
+            new ToolModuleToolBinding(
+                descriptor.ToolId,
+                descriptor.DisplayName,
+                descriptor.Description,
+                inputSchema: descriptor.InputSchema,
+                permission: descriptor.Permissions,
+                sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly),
+                approvalRequirement: descriptor.ApprovalRequirement,
+                requiresHumanGate: true),
+        ]);
+
+        var result = ToolModuleAccessValidator.Validate(
+            manifest,
+            [descriptor],
+            Governance(allowedToolIds: [descriptor.ToolId], maxSideEffectLevel: SideEffectLevel.WorkspaceWrite, requiresHumanGate: true));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, static issue => issue.Code == "tool_access.side_effect_weakened");
+    }
+
+    [Fact]
+    public void ToolModuleAccessValidator_ShouldProjectToolResultAndBlockedResult()
+    {
+        var success = new ToolInvocationResult(
+            new CallId("call-read"),
+            "read_file",
+            streamItems:
+            [
+                new ToolStreamItem("text", StructuredValue.FromPlainObject("file content"), isTerminal: true),
+            ]);
+        var projectedSuccess = ToolModuleAccessValidator.ProjectResult(
+            success,
+            diagnosticsRefs: ["diagnostics://tool/read_file/1"]);
+        var blocked = ToolModuleAccessValidator.ProjectBlockedResult(
+            new CallId("call-write"),
+            "write",
+            "tool_access.governance_denied",
+            "governance denied",
+            ToolModuleResultStatus.ApprovalRequired);
+
+        Assert.True(projectedSuccess.Success);
+        Assert.Equal(ToolModuleResultStatus.Succeeded, projectedSuccess.Status);
+        Assert.Equal("file content", projectedSuccess.OutputText);
+        Assert.Equal("diagnostics://tool/read_file/1", Assert.Single(projectedSuccess.DiagnosticsRefs));
+        Assert.False(blocked.Success);
+        Assert.Equal(ToolModuleResultStatus.ApprovalRequired, blocked.Status);
+        Assert.Equal("tool_access.governance_denied", blocked.Failure?.Code);
+        Assert.Equal("ApprovalRequired", blocked.StructuredOutput.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public void ToolInvocationEnvelope_RequiresPermissionAndCarriesSourceContext()
     {
         var permission = new PermissionEnvelope(["workspace.read"]);
@@ -501,6 +647,82 @@ public sealed class ToolContractTests
                || fullName.StartsWith("TianShu.Provider", StringComparison.Ordinal)
                || type.Name.StartsWith("Kernel", StringComparison.Ordinal);
     }
+
+    private static ToolDescriptor ReadOnlyDescriptor()
+        => new(
+            "read_file",
+            "Read File",
+            "Read a workspace file.",
+            inputSchema: JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                required = new[] { "path" },
+                properties = new
+                {
+                    path = new { type = "string" },
+                },
+            }),
+            permissions: new PermissionDeclaration(["tool.read_file"], requiresHumanGate: false),
+            sideEffects: new SideEffectProfile(SideEffectLevel.ReadOnly),
+            audit: new AuditProfile(eventKinds: ["tool.read_file.invoked"]));
+
+    private static ToolDescriptor WriteDescriptor()
+        => new(
+            "write",
+            "Write",
+            "Write a workspace file.",
+            approvalRequirement: ToolApprovalRequirement.Required,
+            inputSchema: JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                required = new[] { "path", "content" },
+                properties = new
+                {
+                    path = new { type = "string" },
+                    content = new { type = "string" },
+                },
+            }),
+            permissions: new PermissionDeclaration(["tool.write"], requiresHumanGate: true),
+            sideEffects: new SideEffectProfile(SideEffectLevel.WorkspaceWrite),
+            audit: new AuditProfile(eventKinds: ["tool.write.invoked"]));
+
+    private static ToolModuleManifest Manifest(IReadOnlyList<ToolModuleToolBinding> bindings)
+        => new(
+            "builtin.filesystem",
+            "Built-in FileSystem Tools",
+            "1.0.0",
+            "0.6.0",
+            bindings,
+            diagnostics: ["tool.access"]);
+
+    private static ToolModuleToolBinding BindingFromDescriptor(ToolDescriptor descriptor)
+        => new(
+            descriptor.ToolId,
+            descriptor.DisplayName,
+            descriptor.Description,
+            descriptor.Kind,
+            descriptor.InputSchema,
+            descriptor.OutputSchema,
+            descriptor.CustomInputDefinition,
+            descriptor.InputSchemaRef,
+            descriptor.OutputSchemaRef,
+            descriptor.Permissions,
+            descriptor.SideEffects,
+            descriptor.ApprovalRequirement,
+            descriptor.ConcurrencyClass,
+            descriptor.ImplementationBinding,
+            descriptor.Permissions.RequiresHumanGate);
+
+    private static GovernanceEnvelope Governance(
+        IReadOnlyList<string> allowedToolIds,
+        SideEffectLevel maxSideEffectLevel,
+        bool requiresHumanGate)
+        => new(
+            "tool-access",
+            allowedToolIds: allowedToolIds,
+            allowedModuleIds: ["builtin.filesystem"],
+            maxSideEffectLevel: maxSideEffectLevel,
+            requiresHumanGate: requiresHumanGate);
 
     private sealed class EchoToolHandler : ITianShuToolHandler
     {

@@ -14,6 +14,29 @@ function Resolve-FullPath {
     $executionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
 }
 
+function Get-Sha256Hash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+            return ([System.BitConverter]::ToString($bytes) -replace "-", "").ToLowerInvariant()
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Assert-ArchiveRecord {
     param(
         [Parameter(Mandatory = $true)]$Record,
@@ -21,7 +44,7 @@ function Assert-ArchiveRecord {
         [Parameter(Mandatory = $true)][string]$ManifestVersion
     )
 
-    foreach ($propertyName in @("runtimeIdentifier", "assetName", "relativePath", "sha256", "sizeBytes", "entryName")) {
+    foreach ($propertyName in @("runtimeIdentifier", "assetName", "relativePath", "sha256", "sizeBytes", "layout", "entryPath", "configPath", "modulesPath", "appHostPath", "selfContained")) {
         if (-not $Record.PSObject.Properties[$propertyName]) {
             throw "release-manifest archive record is missing '$propertyName'."
         }
@@ -29,9 +52,29 @@ function Assert-ArchiveRecord {
 
     $rid = [string]$Record.runtimeIdentifier
     $assetName = [string]$Record.assetName
-    $expectedPrefix = "tianshu-cli-$ManifestVersion-$rid"
+    $expectedPrefix = "tianshu-$ManifestVersion-$rid"
     if (-not ($assetName -eq "$expectedPrefix.zip" -or $assetName -eq "$expectedPrefix.tar.gz")) {
         throw "Archive asset name does not match version/runtime: $assetName"
+    }
+
+    if ([string]$Record.layout -ne "portable-tianshu-home") {
+        throw "Archive layout must be portable-tianshu-home for $assetName."
+    }
+
+    if ([string]$Record.configPath -ne "tianshu.toml" -or [string]$Record.modulesPath -ne "modules") {
+        throw "Archive config/modules paths are invalid for $assetName."
+    }
+
+    if (-not ([string]$Record.entryPath).StartsWith("bin/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Archive entryPath must point under bin/: $($Record.entryPath)"
+    }
+
+    if (-not ([string]$Record.appHostPath).StartsWith("runtime/apphost/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Archive appHostPath must point under runtime/apphost/: $($Record.appHostPath)"
+    }
+
+    if ($Record.selfContained -ne $true) {
+        throw "Archive selfContained must be true for portable package: $assetName"
     }
 
     $archivePath = Join-Path $Root $assetName
@@ -44,7 +87,7 @@ function Assert-ArchiveRecord {
         throw "Archive size mismatch for $assetName. Manifest=$($Record.sizeBytes), actual=$($item.Length)."
     }
 
-    $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-Sha256Hash -Path $archivePath
     if ($hash -ne [string]$Record.sha256) {
         throw "Archive sha256 mismatch for $assetName. Manifest=$($Record.sha256), actual=$hash."
     }
@@ -70,10 +113,18 @@ if ([string]::IsNullOrWhiteSpace($manifestVersion)) {
     throw "release-manifest version must not be empty."
 }
 
-foreach ($flag in @("publishSingleFile", "publishTrimmed", "selfContained")) {
+foreach ($flag in @("publishSingleFile", "publishTrimmed")) {
     if ($manifest.$flag -ne $false) {
-        throw "release-manifest must keep $flag=false for v0.5.x directory-style packages."
+        throw "release-manifest must keep $flag=false for portable directory-style packages."
     }
+}
+
+if ([string]$manifest.layout -ne "portable-tianshu-home") {
+    throw "release-manifest layout must be portable-tianshu-home."
+}
+
+if ($manifest.selfContained -ne $true) {
+    throw "release-manifest selfContained must be true for portable packages."
 }
 
 $archiveRecords = @($manifest.archives)

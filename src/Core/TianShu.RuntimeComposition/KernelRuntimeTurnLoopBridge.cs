@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using TianShu.Contracts.Agents;
+using TianShu.Contracts.Configuration;
 using TianShu.Contracts.Conversations;
 using TianShu.Contracts.Execution;
 using TianShu.Contracts.Kernel;
+using TianShu.Contracts.Memory;
 using TianShu.Contracts.Primitives;
+using TianShu.Contracts.Tools;
 using TianShu.Execution.Runtime;
 using TianShu.Kernel;
 using TianShu.Kernel.Abstractions;
@@ -27,7 +30,15 @@ public sealed record KernelRuntimeTurnLoopRequest(
     IReadOnlyList<string>? SteerInputs = null,
     bool EnableSubAgents = false,
     ApprovalId? SubAgentApprovalId = null,
-    IReadOnlyDictionary<string, ISubAgentModule>? SubAgentModules = null);
+    IReadOnlyDictionary<string, ISubAgentModule>? SubAgentModules = null,
+    bool EnableShell = false,
+    bool EnableMcp = false,
+    ITianShuMcpResourceToolServices? McpResourceServices = null,
+    IReadOnlyList<TianShuMcpToolDescriptor>? McpToolDescriptors = null,
+    ITianShuMcpToolServices? McpToolServices = null,
+    bool EnableMemory = false,
+    ITianShuMemoryToolServices? MemoryToolServices = null,
+    IReadOnlyDictionary<string, IMemoryModule>? MemoryModules = null);
 
 /// <summary>
 /// 新 Kernel→Runtime turn loop 的产品可消费终态投影。
@@ -143,7 +154,12 @@ public sealed record KernelRuntimeSteerRequest(
     IReadOnlyList<string> SteerInputs,
     string? WorkingDirectory,
     int TurnTimeoutSeconds,
-    ResolvedTianShuConfig Config);
+    ResolvedTianShuConfig Config,
+    bool EnableWorkspaceWrite = false,
+    ApprovalId? WorkspaceWriteApprovalId = null,
+    bool EnableShell = false,
+    bool EnableMcp = false,
+    bool EnableMemory = false);
 
 /// <summary>
 /// 新 Kernel→Runtime turn loop 的诊断与指标产品投影。
@@ -223,28 +239,41 @@ public static class KernelRuntimeTurnLoopBridge
             ? $"thread-cli-kernel-{runSuffix}"
             : request.ResumeThreadId!;
         var turnId = $"turn-cli-kernel-{runSuffix}";
+        var tianShuHomePath = ResolveTianShuHomePath(request.Config);
         var steerInputs = MergeSteerInputs(
-            KernelRuntimeHostControlFileStore.TryConsumePendingSteers(request.WorkingDirectory, threadId),
+            KernelRuntimeHostControlFileStore.TryConsumePendingSteers(request.WorkingDirectory, threadId, tianShuHomePath),
             request.SteerInputs);
         var governance = CreateGovernance(
             runSuffix,
             request.EnableWorkspaceWrite,
             request.WorkspaceWriteApprovalId,
             request.EnableSubAgents,
-            request.SubAgentApprovalId);
+            request.SubAgentApprovalId,
+            request.EnableShell,
+            request.EnableMcp,
+            request.EnableMemory);
         using var activeRun = KernelRuntimeActiveRunRegistry.Register(
             threadId,
             turnId,
             runId.Value,
             request.Message,
             request.WorkingDirectory,
+            tianShuHomePath,
             cancellationToken);
         var metricsSink = new RecordingExecutionRuntimeMetricsSink();
         await using var runtime = KernelRuntimeTurnLoopComposition.CreateRuntime(
             request.Config,
             includeWorkspaceWrite: request.EnableWorkspaceWrite,
+            includeShell: request.EnableShell,
+            includeMcp: request.EnableMcp,
+            mcpResourceServices: request.McpResourceServices,
+            mcpToolDescriptors: request.McpToolDescriptors,
+            mcpToolServices: request.McpToolServices,
+            includeMemory: request.EnableMemory,
+            memoryToolServices: request.MemoryToolServices,
             metricsSink: metricsSink,
-            subAgentModules: request.EnableSubAgents ? request.SubAgentModules : null);
+            subAgentModules: request.EnableSubAgents ? request.SubAgentModules : null,
+            memoryModules: request.EnableMemory ? request.MemoryModules : null);
         var intent = new TurnIntent(
                 intentId,
             new KernelSubjectRef(new SessionId(sessionId), new ThreadId(threadId), turnId: new TurnId(turnId)),
@@ -330,6 +359,7 @@ public static class KernelRuntimeTurnLoopBridge
                 controlOperation: null,
                 checkpointRef: null,
                 steerInputs,
+                tianShuHomePath,
                 cancellationToken)
             .ConfigureAwait(false);
         KernelRuntimeHostControlFileStore.TryPersistCheckpoint(
@@ -340,7 +370,8 @@ public static class KernelRuntimeTurnLoopBridge
             turnStatus,
             replay,
             evidence,
-            steerInputs);
+            steerInputs,
+            tianShuHomePath);
         var terminalProjection = BuildTerminalProjection(
             sessionId,
             threadId,
@@ -394,6 +425,7 @@ public static class KernelRuntimeTurnLoopBridge
                 ["executionPath"] = StructuredValue.FromString("kernel-runtime-loop"),
             }));
 
+        var tianShuHomePath = ResolveTianShuHomePath(request.Config);
         return RunHostControlAsync(
             "interrupt",
             "interrupted",
@@ -408,7 +440,8 @@ public static class KernelRuntimeTurnLoopBridge
                 request.ThreadId,
                 request.TurnId,
                 string.IsNullOrWhiteSpace(request.Reason) ? "user.cancel" : request.Reason,
-                request.WorkingDirectory),
+                request.WorkingDirectory,
+                tianShuHomePath),
             steerInputs: Array.Empty<string>(),
             cancellationToken);
     }
@@ -441,7 +474,8 @@ public static class KernelRuntimeTurnLoopBridge
                 terminalProjection);
         }
 
-        var checkpoint = KernelRuntimeHostControlFileStore.TryResolveCheckpoint(request.WorkingDirectory, request.CheckpointRef);
+        var tianShuHomePath = ResolveTianShuHomePath(request.Config);
+        var checkpoint = KernelRuntimeHostControlFileStore.TryResolveCheckpoint(request.WorkingDirectory, request.CheckpointRef, tianShuHomePath);
         if (checkpoint is null)
         {
             var terminalProjection = BuildUnavailableControlProjection(
@@ -506,7 +540,7 @@ public static class KernelRuntimeTurnLoopBridge
                 intent,
                 checkpoint.CheckpointRef,
                 activeRunCancellation: null,
-                steerInputs: KernelRuntimeHostControlFileStore.TryConsumePendingSteers(request.WorkingDirectory, request.ThreadId),
+                steerInputs: KernelRuntimeHostControlFileStore.TryConsumePendingSteers(request.WorkingDirectory, request.ThreadId, tianShuHomePath),
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -516,11 +550,13 @@ public static class KernelRuntimeTurnLoopBridge
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var tianShuHomePath = ResolveTianShuHomePath(request.Config);
         KernelRuntimeHostControlFileStore.TryEnqueuePendingSteers(
             request.WorkingDirectory,
             request.ThreadId,
             request.TurnId,
-            NormalizeInputs(request.SteerInputs));
+            NormalizeInputs(request.SteerInputs),
+            tianShuHomePath);
         return await RunAsync(
                 new KernelRuntimeTurnLoopRequest(
                     request.Message,
@@ -528,7 +564,12 @@ public static class KernelRuntimeTurnLoopBridge
                     request.ThreadId,
                     request.TurnTimeoutSeconds,
                     request.Config,
-                    SteerInputs: request.SteerInputs),
+                    EnableWorkspaceWrite: request.EnableWorkspaceWrite,
+                    WorkspaceWriteApprovalId: request.WorkspaceWriteApprovalId,
+                    SteerInputs: request.SteerInputs,
+                    EnableShell: request.EnableShell,
+                    EnableMcp: request.EnableMcp,
+                    EnableMemory: request.EnableMemory),
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -576,6 +617,7 @@ public static class KernelRuntimeTurnLoopBridge
         var replay = KernelRuntimeReplayProjector.Build(result, metricsEvents);
         var diagnosticsProjection = KernelRuntimeDiagnosticsProjector.Build(result, replay, metricsEvents);
         var status = result.Disposition == KernelRuntimeExecutionDisposition.RuntimeCompleted ? terminalStatus : "failed";
+        var tianShuHomePath = ResolveTianShuHomePath(config);
         var evidence = await KernelRuntimeProductEvidenceWriter.TryPersistAsync(
                 workingDirectory,
                 sessionId,
@@ -589,6 +631,7 @@ public static class KernelRuntimeTurnLoopBridge
             operation,
             checkpointRef,
             steerInputs,
+            tianShuHomePath,
             cancellationToken)
             .ConfigureAwait(false);
         var terminalProjection = BuildTerminalProjection(
@@ -622,7 +665,10 @@ public static class KernelRuntimeTurnLoopBridge
         bool enableWorkspaceWrite,
         ApprovalId? workspaceWriteApprovalId,
         bool enableSubAgents,
-        ApprovalId? subAgentApprovalId)
+        ApprovalId? subAgentApprovalId,
+        bool enableShell,
+        bool enableMcp,
+        bool enableMemory)
     {
         var allowedToolIds = new List<string>
         {
@@ -638,6 +684,26 @@ public static class KernelRuntimeTurnLoopBridge
         if (enableWorkspaceWrite)
         {
             allowedToolIds.Add("write");
+            allowedToolIds.Add("apply_patch");
+        }
+
+        if (enableShell)
+        {
+            allowedToolIds.Add("shell_command");
+        }
+
+        if (enableMcp)
+        {
+            allowedToolIds.Add("list_mcp_resources");
+            allowedToolIds.Add("list_mcp_resource_templates");
+            allowedToolIds.Add("read_mcp_resource");
+        }
+
+        if (enableMemory)
+        {
+            allowedToolIds.Add("memory_search");
+            allowedToolIds.Add("memory_explain_overlay");
+            allowedToolIds.Add("memory_feedback");
         }
 
         if (enableSubAgents)
@@ -670,13 +736,29 @@ public static class KernelRuntimeTurnLoopBridge
             allowedModuleIds.Add("module.sub_agent");
         }
 
+        if (enableMemory)
+        {
+            allowedModuleIds.Add("memory.identity");
+        }
+
         return new GovernanceEnvelope(
             $"governance-cli-kernel-{runSuffix}",
             allowedToolIds: allowedToolIds,
             allowedModuleIds: allowedModuleIds,
-            maxSideEffectLevel: enableSubAgents ? SideEffectLevel.HostMutation : SideEffectLevel.ExternalNetwork,
-            requiresHumanGate: enableWorkspaceWrite || enableSubAgents,
+            maxSideEffectLevel: enableSubAgents || enableShell ? SideEffectLevel.HostMutation : SideEffectLevel.ExternalNetwork,
+            requiresHumanGate: enableWorkspaceWrite || enableSubAgents || enableShell,
             approvalIds: approvalIds);
+    }
+
+    private static string? ResolveTianShuHomePath(ResolvedTianShuConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var configPath = string.IsNullOrWhiteSpace(config.UserConfigPath)
+            ? config.ConfigFilePath
+            : config.UserConfigPath;
+        return string.IsNullOrWhiteSpace(configPath)
+            ? null
+            : Path.GetDirectoryName(Path.GetFullPath(configPath));
     }
 
     private static GovernanceEnvelope CreateHostControlGovernance(string runSuffix, SideEffectLevel maxSideEffectLevel)
@@ -861,6 +943,7 @@ internal sealed class KernelRuntimeActiveRunRegistration : IDisposable
         string runId,
         string message,
         string? workingDirectory,
+        string? tianShuHomePath,
         CancellationToken parentCancellationToken)
     {
         ThreadId = threadId;
@@ -869,7 +952,7 @@ internal sealed class KernelRuntimeActiveRunRegistration : IDisposable
         Message = message;
         StartedAtUtc = DateTimeOffset.UtcNow;
         cancellation = new CancellationTokenSource();
-        persistentRecord = KernelRuntimeHostControlFileStore.TryRegister(workingDirectory, threadId, turnId, runId, message);
+        persistentRecord = KernelRuntimeHostControlFileStore.TryRegister(workingDirectory, threadId, turnId, runId, message, tianShuHomePath);
         if (persistentRecord is not null)
         {
             monitorTask = MonitorPersistentCancellationAsync(persistentRecord.CancelSignalPath, monitorCancellation.Token);
@@ -998,20 +1081,26 @@ internal static class KernelRuntimeActiveRunRegistry
         string runId,
         string message,
         string? workingDirectory,
+        string? tianShuHomePath,
         CancellationToken cancellationToken)
     {
-        var registration = new KernelRuntimeActiveRunRegistration(threadId, turnId, runId, message, workingDirectory, cancellationToken);
+        var registration = new KernelRuntimeActiveRunRegistration(threadId, turnId, runId, message, workingDirectory, tianShuHomePath, cancellationToken);
         ActiveRunsByThread[NormalizeKey(threadId)] = registration;
         ActiveRunsByTurn[NormalizeKey(turnId)] = registration;
         return registration;
     }
 
-    public static KernelRuntimeActiveRunCancellationProjection Cancel(string threadId, string? turnId, string reason, string? workingDirectory)
+    public static KernelRuntimeActiveRunCancellationProjection Cancel(
+        string threadId,
+        string? turnId,
+        string reason,
+        string? workingDirectory,
+        string? tianShuHomePath = null)
     {
         var registration = Resolve(threadId, turnId);
         if (registration is null)
         {
-            if (KernelRuntimeHostControlFileStore.TryCancel(workingDirectory, threadId, turnId, reason) is { } persistentProjection)
+            if (KernelRuntimeHostControlFileStore.TryCancel(workingDirectory, threadId, turnId, reason, tianShuHomePath) is { } persistentProjection)
             {
                 return persistentProjection;
             }
@@ -1098,7 +1187,8 @@ internal static class KernelRuntimeHostControlFileStore
         string threadId,
         string turnId,
         string runId,
-        string message)
+        string message,
+        string? tianShuHomePath = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -1107,7 +1197,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var root = ResolveRoot(workingDirectory);
+            var root = ResolveRoot(workingDirectory, tianShuHomePath);
             Directory.CreateDirectory(Path.Combine(root, "active-runs", "by-thread"));
             Directory.CreateDirectory(Path.Combine(root, "active-runs", "by-turn"));
             Directory.CreateDirectory(Path.Combine(root, "cancellations"));
@@ -1137,7 +1227,8 @@ internal static class KernelRuntimeHostControlFileStore
         string? workingDirectory,
         string threadId,
         string? turnId,
-        string reason)
+        string reason,
+        string? tianShuHomePath = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -1146,7 +1237,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var record = TryResolve(workingDirectory, threadId, turnId);
+            var record = TryResolve(workingDirectory, threadId, turnId, tianShuHomePath);
             if (record is null)
             {
                 return null;
@@ -1204,7 +1295,8 @@ internal static class KernelRuntimeHostControlFileStore
         string turnStatus,
         KernelRuntimeReplaySummary replay,
         KernelRuntimeProductEvidenceReferences evidence,
-        IReadOnlyList<string> steerInputs)
+        IReadOnlyList<string> steerInputs,
+        string? tianShuHomePath = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -1213,7 +1305,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var root = ResolveRoot(workingDirectory);
+            var root = ResolveRoot(workingDirectory, tianShuHomePath);
             Directory.CreateDirectory(Path.Combine(root, "checkpoints"));
             var record = new KernelRuntimeHostControlCheckpointRecord(
                 BuildTerminalCheckpointRef(threadId, turnId),
@@ -1236,7 +1328,10 @@ internal static class KernelRuntimeHostControlFileStore
         }
     }
 
-    public static KernelRuntimeHostControlCheckpointRecord? TryResolveCheckpoint(string? workingDirectory, string checkpointRef)
+    public static KernelRuntimeHostControlCheckpointRecord? TryResolveCheckpoint(
+        string? workingDirectory,
+        string checkpointRef,
+        string? tianShuHomePath = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory) || string.IsNullOrWhiteSpace(checkpointRef))
         {
@@ -1245,7 +1340,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var root = ResolveRoot(workingDirectory);
+            var root = ResolveRoot(workingDirectory, tianShuHomePath);
             var path = ResolveCheckpointPath(root, checkpointRef);
             return File.Exists(path)
                 ? JsonSerializer.Deserialize<KernelRuntimeHostControlCheckpointRecord>(File.ReadAllText(path), JsonOptions)
@@ -1261,7 +1356,8 @@ internal static class KernelRuntimeHostControlFileStore
         string? workingDirectory,
         string threadId,
         string? turnId,
-        IReadOnlyList<string> inputs)
+        IReadOnlyList<string> inputs,
+        string? tianShuHomePath = null)
     {
         var normalized = NormalizeInputs(inputs);
         if (string.IsNullOrWhiteSpace(workingDirectory) || normalized.Count == 0)
@@ -1271,7 +1367,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var root = ResolveRoot(workingDirectory);
+            var root = ResolveRoot(workingDirectory, tianShuHomePath);
             Directory.CreateDirectory(Path.Combine(root, "pending-steers"));
             var path = ResolvePendingSteerPath(root, threadId);
             var existing = TryReadPendingSteers(path);
@@ -1293,7 +1389,10 @@ internal static class KernelRuntimeHostControlFileStore
         }
     }
 
-    public static IReadOnlyList<string> TryConsumePendingSteers(string? workingDirectory, string threadId)
+    public static IReadOnlyList<string> TryConsumePendingSteers(
+        string? workingDirectory,
+        string threadId,
+        string? tianShuHomePath = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -1302,7 +1401,7 @@ internal static class KernelRuntimeHostControlFileStore
 
         try
         {
-            var root = ResolveRoot(workingDirectory);
+            var root = ResolveRoot(workingDirectory, tianShuHomePath);
             var path = ResolvePendingSteerPath(root, threadId);
             var record = TryReadPendingSteers(path);
             TryDelete(path);
@@ -1329,9 +1428,13 @@ internal static class KernelRuntimeHostControlFileStore
         TryDelete(record.CancelSignalPath);
     }
 
-    private static KernelRuntimePersistentActiveRunRecord? TryResolve(string workingDirectory, string threadId, string? turnId)
+    private static KernelRuntimePersistentActiveRunRecord? TryResolve(
+        string workingDirectory,
+        string threadId,
+        string? turnId,
+        string? tianShuHomePath)
     {
-        var root = ResolveRoot(workingDirectory);
+        var root = ResolveRoot(workingDirectory, tianShuHomePath);
         if (!string.IsNullOrWhiteSpace(turnId))
         {
             var byTurn = Path.Combine(root, "active-runs", "by-turn", SanitizePathSegment(turnId!) + ".json");
@@ -1359,8 +1462,10 @@ internal static class KernelRuntimeHostControlFileStore
         }
     }
 
-    private static string ResolveRoot(string workingDirectory)
-        => Path.Combine(Path.GetFullPath(workingDirectory), ".tianshu", "kernel-runtime", "host-control");
+    private static string ResolveRoot(string workingDirectory, string? tianShuHomePath)
+        => string.IsNullOrWhiteSpace(tianShuHomePath)
+            ? TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePath("kernel-runtime", workingDirectory, "host-control")
+            : TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(tianShuHomePath!, "kernel-runtime", workingDirectory, "host-control");
 
     private static string ResolveCheckpointPath(string root, string checkpointRef)
         => Path.Combine(root, "checkpoints", SanitizePathSegment(checkpointRef) + ".json");
@@ -1431,6 +1536,7 @@ internal static class KernelRuntimeProductEvidenceWriter
         string? controlOperation,
         string? checkpointRef,
         IReadOnlyList<string> steerInputs,
+        string? tianShuHomePath,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory))
@@ -1441,9 +1547,9 @@ internal static class KernelRuntimeProductEvidenceWriter
         try
         {
             var evidenceDirectory = Path.Combine(
-                Path.GetFullPath(workingDirectory),
-                ".tianshu",
-                "kernel-runtime",
+                string.IsNullOrWhiteSpace(tianShuHomePath)
+                    ? TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePath("kernel-runtime", workingDirectory, "evidence")
+                    : TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(tianShuHomePath!, "kernel-runtime", workingDirectory, "evidence"),
                 SanitizePathSegment(threadId),
                 SanitizePathSegment(turnId));
             Directory.CreateDirectory(evidenceDirectory);

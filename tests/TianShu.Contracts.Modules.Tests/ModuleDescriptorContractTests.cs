@@ -23,8 +23,45 @@ public sealed class ModuleDescriptorContractTests
         Assert.Equal(ModuleTrustLevel.Unspecified, descriptor.TrustLevel);
         Assert.True(descriptor.Permission.RequiresHumanGate);
         Assert.Equal(SideEffectLevel.Unspecified, descriptor.SideEffects.Level);
+        Assert.Empty(descriptor.RequiredConfiguration);
+        Assert.Empty(descriptor.RuntimeDependencies);
+        Assert.Equal("0.0.0", descriptor.MinimumTianShuVersion);
         Assert.Equal(ModuleHealthStatus.Unknown, descriptor.Health.Status);
         Assert.True(descriptor.Audit.Required);
+    }
+
+    [Fact]
+    public void ModuleDescriptor_ShouldExposeRequiredConfigurationDependenciesAndMinimumVersion()
+    {
+        var configuration = new ModuleConfigurationRequirement(
+            "provider.example.apiKeyEnvironmentVariable",
+            "Example API key environment variable",
+            required: true,
+            secret: true,
+            description: "Stores the environment variable name, not the secret value.");
+        var dependency = new ModuleRuntimeDependency(
+            "example-provider",
+            "Example provider assembly",
+            ModuleRuntimeDependencyKind.DotNetAssembly,
+            versionRange: "[1.0.0,2.0.0)",
+            required: true);
+
+        var descriptor = new ModuleDescriptor(
+            "provider.example",
+            ModuleKind.Provider,
+            "Example Provider",
+            "1.2.3",
+            requiredConfiguration: [configuration],
+            runtimeDependencies: [dependency],
+            minimumTianShuVersion: "0.6.0");
+
+        Assert.Single(descriptor.RequiredConfiguration);
+        Assert.True(descriptor.RequiredConfiguration[0].Required);
+        Assert.True(descriptor.RequiredConfiguration[0].Secret);
+        Assert.Single(descriptor.RuntimeDependencies);
+        Assert.Equal(ModuleRuntimeDependencyKind.DotNetAssembly, descriptor.RuntimeDependencies[0].Kind);
+        Assert.Equal("[1.0.0,2.0.0)", descriptor.RuntimeDependencies[0].VersionRange);
+        Assert.Equal("0.6.0", descriptor.MinimumTianShuVersion);
     }
 
     [Fact]
@@ -48,6 +85,9 @@ public sealed class ModuleDescriptorContractTests
             Assert.NotNull(descriptor.ConfigurationSchema);
             Assert.NotNull(descriptor.ImplementationBinding);
             Assert.NotEqual(SideEffectLevel.Unspecified, descriptor.SideEffects.Level);
+            Assert.NotEmpty(descriptor.RequiredConfiguration);
+            Assert.NotEmpty(descriptor.RuntimeDependencies);
+            Assert.Equal("0.6.0", descriptor.MinimumTianShuVersion);
             Assert.True(descriptor.Audit.Required);
             Assert.Equal(ModuleHealthStatus.Unknown, descriptor.Health.Status);
         });
@@ -62,6 +102,72 @@ public sealed class ModuleDescriptorContractTests
         Assert.NotNull(method);
         Assert.Equal(typeof(ValueTask<ModuleSmokeCheckResult>), method!.ReturnType);
         Assert.Equal(typeof(CancellationToken), Assert.Single(method.GetParameters()).ParameterType);
+    }
+
+    [Fact]
+    public void ModuleDiscoveryResolver_ShouldPreferBuiltInCandidateForDuplicateModuleId()
+    {
+        var builtInRoot = new ModuleDiscoveryRoot(
+            "builtin",
+            "builtin://modules",
+            ModuleDiscoverySourceKind.BuiltIn,
+            ModuleTrustLevel.BuiltIn);
+        var thirdPartyRoot = new ModuleDiscoveryRoot(
+            "third-party",
+            "/tmp/third-party",
+            ModuleDiscoverySourceKind.ThirdPartyDirectory,
+            ModuleTrustLevel.ThirdParty,
+            priority: -100);
+        var builtIn = DiscoveryCandidate("provider.openai", ModuleKind.Provider, builtInRoot, priority: 100);
+        var duplicate = DiscoveryCandidate("provider.openai", ModuleKind.Provider, thirdPartyRoot, priority: -100);
+
+        var snapshot = ModuleDiscoveryResolver.Resolve([builtInRoot, thirdPartyRoot], [duplicate, builtIn]);
+
+        Assert.Equal(2, snapshot.Candidates.Count);
+        Assert.Equal(ModuleDiscoveryCandidateStatus.Selected, snapshot.Candidates.Single(candidate => candidate.Manifest.Source.Root.SourceKind == ModuleDiscoverySourceKind.BuiltIn).Status);
+        Assert.Equal(ModuleDiscoveryCandidateStatus.DuplicateRejected, snapshot.Candidates.Single(candidate => candidate.Manifest.Source.Root.SourceKind == ModuleDiscoverySourceKind.ThirdPartyDirectory).Status);
+        Assert.Contains(snapshot.Issues, static issue => issue.Code == "module_discovery.duplicate_rejected");
+    }
+
+    [Fact]
+    public void ModuleDiscoveryResolver_ShouldDisableManifestAndExternalDisableListBeforeSelection()
+    {
+        var root = new ModuleDiscoveryRoot(
+            "user-home",
+            "/tmp/modules",
+            ModuleDiscoverySourceKind.UserHome,
+            ModuleTrustLevel.UserInstalled);
+        var manifestDisabled = DiscoveryCandidate("tool.disabled-by-manifest", ModuleKind.Tool, root, enabled: false);
+        var policyDisabled = DiscoveryCandidate("tool.disabled-by-policy", ModuleKind.Tool, root);
+        var enabled = DiscoveryCandidate("tool.enabled", ModuleKind.Tool, root);
+
+        var snapshot = ModuleDiscoveryResolver.Resolve(
+            [root],
+            [manifestDisabled, policyDisabled, enabled],
+            disabledModuleIds: new HashSet<string>(["tool.disabled-by-policy"], StringComparer.Ordinal));
+
+        Assert.Equal(ModuleDiscoveryCandidateStatus.Disabled, snapshot.Candidates.Single(candidate => candidate.Manifest.ModuleId == "tool.disabled-by-manifest").Status);
+        Assert.Equal(ModuleDiscoveryCandidateStatus.Disabled, snapshot.Candidates.Single(candidate => candidate.Manifest.ModuleId == "tool.disabled-by-policy").Status);
+        Assert.Equal(ModuleDiscoveryCandidateStatus.Selected, snapshot.Candidates.Single(candidate => candidate.Manifest.ModuleId == "tool.enabled").Status);
+        Assert.DoesNotContain(snapshot.SelectedCandidates, static candidate => candidate.Manifest.ModuleId.Contains("disabled", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ModuleDiscoveryResolver_ShouldRejectUnspecifiedKindAsInvalidManifest()
+    {
+        var root = new ModuleDiscoveryRoot(
+            "user-home",
+            "/tmp/modules",
+            ModuleDiscoverySourceKind.UserHome,
+            ModuleTrustLevel.UserInstalled);
+        var candidate = DiscoveryCandidate("custom.invalid", ModuleKind.Unspecified, root);
+
+        var snapshot = ModuleDiscoveryResolver.Resolve([root], [candidate]);
+
+        var resolved = Assert.Single(snapshot.Candidates);
+        Assert.Equal(ModuleDiscoveryCandidateStatus.ManifestInvalid, resolved.Status);
+        Assert.Empty(snapshot.SelectedCandidates);
+        Assert.Contains(snapshot.Issues, static issue => issue.Code == "module_manifest.kind_unspecified");
     }
 
     [Fact]
@@ -153,6 +259,10 @@ public sealed class ModuleDescriptorContractTests
             Assert.NotEmpty(descriptor.Capabilities);
             Assert.Equal(SideEffectLevel.ExternalNetwork, descriptor.SideEffects.Level);
             Assert.Contains("network", descriptor.SideEffects.AffectedResources);
+            Assert.NotEmpty(descriptor.RequiredConfiguration);
+            Assert.Contains(descriptor.RequiredConfiguration, requirement => requirement.Required);
+            Assert.NotEmpty(descriptor.RuntimeDependencies);
+            Assert.Equal("0.6.0", descriptor.MinimumTianShuVersion);
             Assert.NotNull(descriptor.ImplementationBinding);
         });
     }
@@ -180,6 +290,10 @@ public sealed class ModuleDescriptorContractTests
         Assert.Equal(ModuleTrustLevel.BuiltIn, descriptor.TrustLevel);
         Assert.Single(descriptor.Capabilities);
         Assert.Equal(SideEffectLevel.ReadOnly, descriptor.SideEffects.Level);
+        Assert.Single(descriptor.RequiredConfiguration);
+        Assert.False(descriptor.RequiredConfiguration[0].Required);
+        Assert.Single(descriptor.RuntimeDependencies);
+        Assert.Equal("0.6.0", descriptor.MinimumTianShuVersion);
         Assert.True(descriptor.Audit.Required);
         Assert.NotNull(descriptor.ImplementationBinding);
     }
@@ -224,4 +338,19 @@ public sealed class ModuleDescriptorContractTests
 
         throw new DirectoryNotFoundException("Unable to locate repository root.");
     }
+
+    private static ModuleDiscoveryCandidate DiscoveryCandidate(
+        string moduleId,
+        ModuleKind kind,
+        ModuleDiscoveryRoot root,
+        int priority = 0,
+        bool enabled = true)
+        => new(new ModuleManifestProjection(
+            moduleId,
+            kind,
+            moduleId,
+            "1.0.0",
+            new ModuleManifestSource(Path.Combine(root.Path, moduleId, "module.toml"), root),
+            enabled: enabled,
+            priority: priority));
 }

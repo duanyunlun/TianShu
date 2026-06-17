@@ -15,6 +15,7 @@ public enum StrategyLifecycleState
     Promoted = 4,
     Deprecated = 5,
     RolledBack = 6,
+    Candidate = 7,
 }
 
 /// <summary>
@@ -58,16 +59,20 @@ public sealed record StrategyRecord
         StrategyId strategyId,
         string name,
         StageGraphId graphId,
-        StrategyLifecycleState lifecycleState = StrategyLifecycleState.Draft,
+        StrategyLifecycleState lifecycleState = StrategyLifecycleState.Candidate,
         IReadOnlyList<StrategyTransitionEvidence>? transitionEvidence = null,
-        DateTimeOffset updatedAt = default)
+        DateTimeOffset updatedAt = default,
+        IReadOnlyList<StrategyLifecycleAuditRecord>? lifecycleAuditRecords = null)
     {
         StrategyId = strategyId;
         Name = KernelContractGuard.RequiredText(name, nameof(name));
         GraphId = graphId;
-        LifecycleState = lifecycleState;
+        LifecycleState = lifecycleState == StrategyLifecycleState.Unspecified
+            ? throw new ArgumentOutOfRangeException(nameof(lifecycleState), "LifecycleState 不能为 Unspecified。")
+            : lifecycleState;
         TransitionEvidence = KernelContractGuard.ListOrEmpty(transitionEvidence);
         UpdatedAt = updatedAt == default ? DateTimeOffset.UtcNow : updatedAt;
+        LifecycleAuditRecords = KernelContractGuard.ListOrEmpty(lifecycleAuditRecords);
     }
 
     public StrategyId StrategyId { get; }
@@ -81,6 +86,62 @@ public sealed record StrategyRecord
     public IReadOnlyList<StrategyTransitionEvidence> TransitionEvidence { get; }
 
     public DateTimeOffset UpdatedAt { get; }
+
+    public IReadOnlyList<StrategyLifecycleAuditRecord> LifecycleAuditRecords { get; }
+}
+
+/// <summary>
+/// Strategy 生命周期审计记录，记录 candidate / trial / promoted / deprecated / rolled_back 的可追踪变更。
+/// Strategy lifecycle audit record for traceable candidate / trial / promoted / deprecated / rolled_back changes.
+/// </summary>
+public sealed record StrategyLifecycleAuditRecord
+{
+    public StrategyLifecycleAuditRecord(
+        string auditId,
+        StrategyId strategyId,
+        StrategyLifecycleState previousState,
+        StrategyLifecycleState targetState,
+        IReadOnlyList<string> evidenceRefs,
+        IReadOnlyList<string>? metricRefs = null,
+        bool humanApproved = false,
+        string? reasonRef = null,
+        DateTimeOffset occurredAt = default)
+    {
+        AuditId = KernelContractGuard.RequiredText(auditId, nameof(auditId));
+        StrategyId = strategyId;
+        PreviousState = previousState;
+        TargetState = targetState == StrategyLifecycleState.Unspecified
+            ? throw new ArgumentOutOfRangeException(nameof(targetState), "TargetState 不能为 Unspecified。")
+            : targetState;
+        EvidenceRefs = KernelContractGuard.ListOrEmpty(evidenceRefs);
+        if (EvidenceRefs.Count == 0)
+        {
+            throw new ArgumentException("Strategy lifecycle audit record 必须至少包含一个 evidence ref。", nameof(evidenceRefs));
+        }
+
+        MetricRefs = KernelContractGuard.ListOrEmpty(metricRefs);
+        HumanApproved = humanApproved;
+        ReasonRef = reasonRef;
+        OccurredAt = occurredAt == default ? DateTimeOffset.UtcNow : occurredAt;
+    }
+
+    public string AuditId { get; }
+
+    public StrategyId StrategyId { get; }
+
+    public StrategyLifecycleState PreviousState { get; }
+
+    public StrategyLifecycleState TargetState { get; }
+
+    public IReadOnlyList<string> EvidenceRefs { get; }
+
+    public IReadOnlyList<string> MetricRefs { get; }
+
+    public bool HumanApproved { get; }
+
+    public string? ReasonRef { get; }
+
+    public DateTimeOffset OccurredAt { get; }
 }
 
 /// <summary>
@@ -96,7 +157,12 @@ public sealed record KernelEvaluationResult
         KernelReviewDecision decision,
         IReadOnlyDictionary<string, decimal>? metricScores = null,
         string? summaryRef = null,
-        DateTimeOffset evaluatedAt = default)
+        DateTimeOffset evaluatedAt = default,
+        KernelEvaluationEvidenceSet? evidence = null,
+        IReadOnlyList<KernelEvaluationMetricObservation>? observations = null,
+        IReadOnlyList<KernelEvaluationDisagreement>? disagreements = null,
+        decimal? overallConfidence = null,
+        decimal? disagreementScore = null)
     {
         EvaluationId = KernelContractGuard.RequiredText(evaluationId, nameof(evaluationId));
         RunId = runId;
@@ -105,6 +171,11 @@ public sealed record KernelEvaluationResult
         MetricScores = metricScores ?? new Dictionary<string, decimal>(StringComparer.Ordinal);
         SummaryRef = summaryRef;
         EvaluatedAt = evaluatedAt == default ? DateTimeOffset.UtcNow : evaluatedAt;
+        Evidence = evidence ?? new KernelEvaluationEvidenceSet();
+        Observations = KernelContractGuard.ListOrEmpty(observations);
+        Disagreements = KernelContractGuard.ListOrEmpty(disagreements);
+        OverallConfidence = ValidateRatio(overallConfidence, nameof(overallConfidence));
+        DisagreementScore = ValidateRatio(disagreementScore, nameof(disagreementScore));
     }
 
     public string EvaluationId { get; }
@@ -120,4 +191,24 @@ public sealed record KernelEvaluationResult
     public string? SummaryRef { get; }
 
     public DateTimeOffset EvaluatedAt { get; }
+
+    public KernelEvaluationEvidenceSet Evidence { get; }
+
+    public IReadOnlyList<KernelEvaluationMetricObservation> Observations { get; }
+
+    public IReadOnlyList<KernelEvaluationDisagreement> Disagreements { get; }
+
+    public decimal? OverallConfidence { get; }
+
+    public decimal? DisagreementScore { get; }
+
+    private static decimal? ValidateRatio(decimal? value, string paramName)
+    {
+        if (value is < 0m or > 1m)
+        {
+            throw new ArgumentOutOfRangeException(paramName, "值必须位于 0 到 1 之间。");
+        }
+
+        return value;
+    }
 }

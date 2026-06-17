@@ -15,5 +15,6 @@
     <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Interactions\TianShu.Contracts.Interactions.csproj" />
     <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Kernel\TianShu.Contracts.Kernel.csproj" />
     <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Projections\TianShu.Contracts.Projections.csproj" />
+    <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Remote\TianShu.Contracts.Remote.csproj" />
   </ItemGroup>
 </Project>

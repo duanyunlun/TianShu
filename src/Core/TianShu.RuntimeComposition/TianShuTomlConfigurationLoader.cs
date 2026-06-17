@@ -1,4 +1,5 @@
 using TianShu.Configuration;
+using TianShu.Contracts.Configuration;
 using TianShu.Provider.Abstractions;
 using TianShu.Contracts.Sessions;
 using System.Text.Json;
@@ -26,15 +27,16 @@ public sealed class TianShuTomlConfigurationLoader
         string? configFilePath,
         string? profileOverride,
         IReadOnlyDictionary<string, string>? configOverrides,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        string? programDirectory = null)
     {
         var explicitPath = Normalize(configFilePath);
-        var userPath = NormalizeFilePath(string.IsNullOrWhiteSpace(explicitPath) ? ResolveDefaultPath() : explicitPath!);
+        var userPath = NormalizeFilePath(string.IsNullOrWhiteSpace(explicitPath) ? ResolveDefaultPath(programDirectory) : explicitPath!);
         var sessionFlagsLayer = CreateSessionFlagsLayer(
             profileOverride,
             configOverrides,
             ResolveSessionFlagsBaseDirectory(workingDirectory));
-        var loadPlan = ResolveLoadLayers(userPath, sessionFlagsLayer, workingDirectory);
+        var loadPlan = ResolveLoadLayers(userPath, sessionFlagsLayer, workingDirectory, programDirectory);
         var layers = loadPlan.Layers;
         var root = LoadMergedRoot(layers, includeDisabled: false);
         var normalizedWorkingDirectory = loadPlan.NormalizedWorkingDirectory;
@@ -191,6 +193,20 @@ public sealed class TianShuTomlConfigurationLoader
     public static string ResolveDefaultPath()
         => ConfigTomlPathResolver.ResolveUserConfigTomlPath();
 
+    internal static string ResolveDefaultPath(string? programDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(programDirectory))
+        {
+            return ResolveDefaultPath();
+        }
+
+        var homePath = TianShuRuntimeLayoutPaths.ResolveTianShuHomePathFrom(
+            programDirectory!,
+            Environment.GetEnvironmentVariable("TIANSHU_HOME"),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        return TianShuRuntimeLayoutPaths.ResolveTianShuConfigFilePathFromHome(homePath);
+    }
+
     private static string ResolveSystemConfigPath()
         => ConfigTomlPathResolver.ResolveSystemConfigTomlPath();
 
@@ -218,12 +234,18 @@ public sealed class TianShuTomlConfigurationLoader
     private static ResolvedLoadLayers ResolveLoadLayers(
         string userPath,
         ConfigLayer? sessionFlagsLayer,
-        string? workingDirectory)
+        string? workingDirectory,
+        string? programDirectory)
     {
         var layers = new List<ConfigLayer>();
         var seenPaths = new HashSet<string>(PathComparer);
+        var isPortableMode = IsPortableModeForConfigPath(userPath, programDirectory);
 
-        AddRequiredLayer(layers, seenPaths, ResolvedTianShuConfigLayerSourceKind.System, ResolveSystemConfigPath());
+        if (!isPortableMode)
+        {
+            AddRequiredLayer(layers, seenPaths, ResolvedTianShuConfigLayerSourceKind.System, ResolveSystemConfigPath());
+        }
+
         AddUserModuleDefaultLayers(layers, seenPaths, userPath);
         AddRequiredLayer(layers, seenPaths, ResolvedTianShuConfigLayerSourceKind.User, userPath);
         AddUserProviderInstanceLayers(layers, seenPaths, userPath);
@@ -291,6 +313,20 @@ public sealed class TianShuTomlConfigurationLoader
             LegacyManagedConfigMigrationOnlyDisabledReason);
 
         return new ResolvedLoadLayers(layers, normalizedWorkingDirectory, trustContext, workspaceResolverPolicy);
+    }
+
+    internal static bool IsPortableModeForConfigPath(string userPath, string? programDirectory = null)
+    {
+        var layout = string.IsNullOrWhiteSpace(programDirectory)
+            ? TianShuRuntimeLayoutPaths.TryResolvePortableTianShuHomeLayout()
+            : TianShuRuntimeLayoutPaths.TryResolvePortableTianShuHomeLayoutFrom(programDirectory!);
+        if (layout is null)
+        {
+            return false;
+        }
+
+        var normalizedUserPath = NormalizeFilePath(userPath);
+        return string.Equals(normalizedUserPath, Path.GetFullPath(layout.ConfigFilePath), PathComparison);
     }
 
     private static ConfigLayer? CreateSessionFlagsLayer(

@@ -61,6 +61,9 @@ public sealed class StageGraphInterpreter : IStageGraphInterpreter
             "finalize" => CreateFinalizeSteps(graph, stage, context),
             "interrupt-host" => [CreateHostInteractionStep(graph, stage, context, "interrupt.cancel_tail_stream")],
             "resume-host" => [CreateHostInteractionStep(graph, stage, context, "resume.from_checkpoint")],
+            "memory-retrieve" => [CreateMemoryCapabilityStep(graph, stage, context, "memory.retrieve", requiresHumanGate: false)],
+            "memory-form" => [CreateMemoryCapabilityStep(graph, stage, context, "memory.form", requiresHumanGate: true)],
+            "memory-supersede" => [CreateMemoryCapabilityStep(graph, stage, context, "memory.supersede", requiresHumanGate: true)],
             _ => [CreateModuleCapabilityFallbackStep(graph, stage, context)],
         };
 
@@ -224,6 +227,49 @@ public sealed class StageGraphInterpreter : IStageGraphInterpreter
         {
             envelope["resumeToken"] = resume.ResumeToken;
             envelope["checkpointRef"] = resume.CheckpointRef;
+        }
+
+        return StructuredValue.FromPlainObject(envelope);
+    }
+
+    private static ModuleCapabilityStep CreateMemoryCapabilityStep(
+        StageGraph graph,
+        StageNode stage,
+        KernelInterpreterContext context,
+        string capabilityId,
+        bool requiresHumanGate)
+        => new(
+            $"step-{stage.StageId.Value}",
+            context.Intent.IntentId,
+            graph.GraphId,
+            stage.StageId,
+            KernelIds.OperationIdFor(stage.StageId),
+            "memory.identity",
+            capabilityId,
+            CreateMemoryStageEnvelope(stage, capabilityId),
+            new PermissionEnvelope(
+                [capabilityId],
+                requiresHumanGate: requiresHumanGate || context.Governance.RequiresHumanGate,
+                reason: "Stable Kernel Core approved Memory Module capability."),
+            new SideEffectProfile(stage.SideEffectLevel, ["memory"], reversible: capabilityId == "memory.retrieve", requiresAudit: true),
+            stage.Budget,
+            stage.OutputContract,
+            new TracePolicy(enabled: true, requireDiagnosticsRef: true, requireRuntimeTraceRef: true));
+
+    private static StructuredValue CreateMemoryStageEnvelope(StageNode stage, string capabilityId)
+    {
+        var envelope = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["objective"] = stage.Objective,
+            ["inputContract"] = stage.InputContract.ContractId,
+            ["outputContract"] = stage.OutputContract.ContractId,
+            ["stageKind"] = stage.Kind,
+            ["memoryCapabilityId"] = capabilityId,
+        };
+
+        if (capabilityId == "memory.retrieve")
+        {
+            envelope["queryText"] = stage.Objective;
         }
 
         return StructuredValue.FromPlainObject(envelope);

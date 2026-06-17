@@ -111,7 +111,18 @@ public sealed class MemoryServiceModuleAdapter : IMemoryModule
 - `MemoryModuleMutationInvocation` 拒绝明显的完整模型思考链字段或来源片段，例如 `chain_of_thought`、`reasoning_trace`、`full_model_thoughts`。
 - Memory Module 不保存完整模型思考链；只允许保存用户确认事实、工具证据、artifact 引用、反馈和可审计摘要。
 
-## 6. Tool 对齐
+## 6. retrieve / form / supersede 能力边界
+
+Memory 能力面必须区分读取、形成候选和正式取代：
+
+- `retrieve` 是只读能力，只能返回 typed projection、evidence ref 与 `MemoryContextCandidateProjection`。
+- `form` 表达形成候选记忆，不等于长期写入；候选进入 review / approval / audit 后才能转为正式 mutation。
+- `supersede` 表达正式事实取代，必须保留 old record ref、new record ref、supersede reason、approval ref 和 audit ref。
+- `forget`、`delete`、`supersede` 不能被 Memory tool handler 私自执行，必须经过治理信封、副作用校验和 human gate。
+- Memory 检索结果只能作为 `ContextSourceCandidate(ContextSourceKind.MemoryRecord)` 进入 `ApprovedContextPolicy`；Memory Module 不决定 token budget、低置信降级、去重或最终 inclusion / drop。
+- Memory compression 在正式实现前只能作为 reservation / candidate，不得作为可执行 RuntimeStep 开放。
+
+## 7. Tool 对齐
 
 `src/Tools/TianShu.Tools.Memory` 当前提供 `MemoryToolProvider` 与 handler。新架构下必须通过 `TianShuToolHandlerAdapter` 投影为 `ITianShuTool`，再由 Execution Runtime 的 tool bridge 执行。
 
@@ -121,7 +132,7 @@ Memory tool 规则：
 - `memory_feedback` 是受治理写入能力，只记录反馈 / 审计证据，不直接覆盖长期事实。
 - Memory tool descriptor 必须声明 permission、side effect、audit 和 implementation binding。
 
-## 7. 验收标准
+## 8. 验收标准
 
 - `IMemoryModule` 暴露 query / mutation / health check 统一入口。
 - Memory query 和 mutation 能关联 `RuntimeStepId`、`SourceIntentId`、`SourceGraphId`、`SourceStageId`、`SourceKernelOperationId`。
@@ -129,3 +140,5 @@ Memory tool 规则：
 - Memory Module 不保存完整模型思考链。
 - `TianShu.Tools.Memory` 能通过 `TianShuToolHandlerAdapter` 对齐为 `ITianShuTool`。
 - Memory contract 不引用 `TianShu.IdentityMemory`、Execution Runtime、AppHost 或 provider 实现。
+- Memory retrieve 不能绕过 ContextPolicy 直接塞入 provider request。
+- Memory form / supersede 必须覆盖 governance、human gate、audit 和 supersede link。

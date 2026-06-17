@@ -10,6 +10,7 @@ using TianShu.Contracts.Agents;
 using TianShu.Contracts.Artifacts;
 using TianShu.Contracts.Catalog;
 using TianShu.Contracts.Collaboration;
+using TianShu.Contracts.Configuration;
 using TianShu.Contracts.Conversations;
 using TianShu.Contracts.Diagnostics;
 using TianShu.Contracts.Environment;
@@ -1049,6 +1050,7 @@ console.log(restored);
             "cli-userinput-input-followup-001",
             "user_input_submission");
         Assert.Equal("A", followUpUserInputPayload.Payload.Properties["answers"].Properties["choice"].GetString());
+        AssertNoCwdRuntimeArtifacts(workspace.RootPath);
     }
 
     [Fact]
@@ -1104,6 +1106,7 @@ console.log(restored);
             .GetProperty("activeRunCancellation");
         Assert.True(cancellation.GetProperty("available").GetBoolean());
         Assert.Equal("active-run://thread-product-interrupt-001/turn-product-interrupt-001/run-product-interrupt-001", cancellation.GetProperty("reference").GetString());
+        AssertNoCwdRuntimeArtifacts(workspace.RootPath);
     }
 
     [Fact]
@@ -1163,6 +1166,7 @@ console.log(restored);
             Assert.Contains(
                 steer.GetProperty("inputs").EnumerateArray().Select(static item => item.GetString()),
                 static item => item == "中途引导：请只回答 OK");
+            AssertNoCwdRuntimeArtifacts(workspace.RootPath);
         }
         finally
         {
@@ -1224,6 +1228,7 @@ console.log(restored);
         Assert.Contains(
             steer.GetProperty("inputs").EnumerateArray().Select(static item => item.GetString()),
             static item => item == "恢复前的 pending steer");
+        AssertNoCwdRuntimeArtifacts(workspace.RootPath);
     }
 
     [Fact(Skip = "旧 AppHost send 兼容路径已移除；对应主线行为由 Kernel→Runtime loop 用例覆盖。")]
@@ -6095,7 +6100,7 @@ console.log(restored);
 
     private static string WriteHostControlActiveRunRecord(string workspacePath, string threadId, string turnId, string runId)
     {
-        var root = Path.Combine(workspacePath, ".tianshu", "kernel-runtime", "host-control");
+        var root = ResolveKernelRuntimeHostControlRoot(workspacePath);
         var threadIndexDirectory = Path.Combine(root, "active-runs", "by-thread");
         var turnIndexDirectory = Path.Combine(root, "active-runs", "by-turn");
         var cancellationDirectory = Path.Combine(root, "cancellations");
@@ -6131,7 +6136,7 @@ console.log(restored);
         string turnId,
         IReadOnlyList<string> steerInputs)
     {
-        var root = Path.Combine(workspacePath, ".tianshu", "kernel-runtime", "host-control");
+        var root = ResolveKernelRuntimeHostControlRoot(workspacePath);
         var checkpointDirectory = Path.Combine(root, "checkpoints");
         Directory.CreateDirectory(checkpointDirectory);
         var checkpointRef = $"checkpoint://kernel-runtime/{threadId}/{turnId}/terminal";
@@ -6162,7 +6167,7 @@ console.log(restored);
         string turnId,
         IReadOnlyList<string> inputs)
     {
-        var root = Path.Combine(workspacePath, ".tianshu", "kernel-runtime", "host-control");
+        var root = ResolveKernelRuntimeHostControlRoot(workspacePath);
         var pendingSteerDirectory = Path.Combine(root, "pending-steers");
         Directory.CreateDirectory(pendingSteerDirectory);
         var payload = JsonSerializer.Serialize(
@@ -6175,6 +6180,19 @@ console.log(restored);
             },
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         File.WriteAllText(Path.Combine(pendingSteerDirectory, SanitizePathSegment(threadId) + ".json"), payload, new UTF8Encoding(false));
+    }
+
+    private static string ResolveKernelRuntimeHostControlRoot(string workspacePath)
+        => TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(
+            Path.Combine(workspacePath, ".tianshu"),
+            "kernel-runtime",
+            workspacePath,
+            "host-control");
+
+    private static void AssertNoCwdRuntimeArtifacts(string workspacePath)
+    {
+        Assert.False(Directory.Exists(Path.Combine(workspacePath, ".tianshu", "kernel-runtime")));
+        Assert.False(Directory.Exists(Path.Combine(workspacePath, ".tianshu-cli")));
     }
 
     private static bool JsonContainsString(JsonElement element, string expected)

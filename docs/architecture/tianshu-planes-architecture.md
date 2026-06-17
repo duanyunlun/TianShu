@@ -22,7 +22,7 @@ Experience Plane
 | Experience Plane | `TianShu.Cli`、`TianShu.ConfigGui`、`TianShu.VSSDK.Sidecar`、`TianShu.VSSDK.VSExtension` | 入口项目已存在，仍需要按 Host Gateway typed surface 收敛。 |
 | Host Gateway Plane | `TianShu.Contracts.Host`、`TianShu.HostGateway`、`TianShu.AppHost` | typed host surface 已存在，AppHost 仍承担较多运行时装配职责。 |
 | Control Plane | `TianShu.ControlPlane.Abstractions`、`TianShu.ControlPlane`、控制相关 contracts | 控制面项目已存在，职责必须收敛为 operation 归一化、治理和路由。 |
-| Kernel / Core Loop Plane | 当前散落在 `TianShu.RuntimeComposition`、`TianShu.AppHost`、`TianShu.AppHost.Tools.Runtime`、`TianShu.Execution.Runtime` | 目标项目尚未建立，必须按 Kernel 专项文档迁出。 |
+| Kernel / Core Loop Plane | `TianShu.Contracts.Kernel`、`TianShu.Kernel.Abstractions`、`TianShu.Kernel`、`TianShu.Kernel.Adaptive`、`TianShu.Kernel.Strategies`、`TianShu.RuntimeComposition` | Kernel 合同、稳定内核、自适应候选和策略生命周期项目已建立；RuntimeComposition 只保留组合入口，AppHost 不拥有 Kernel 语义。 |
 | Execution Runtime Plane | `TianShu.Execution.Protocol`、`TianShu.Execution.Runtime` | 运行时项目已存在，目标是只执行 Kernel 批准的 `ExecutionPlan` / `RuntimeStep`。 |
 | Module Plane | `TianShu.Provider.*`、`TianShu.Tools.*`、`TianShu.IdentityMemory`、`TianShu.ArtifactStore`、`TianShu.Diagnostics`、`TianShu.ProjectionStores`、`TianShu.Configuration` | 具体能力项目已存在，需统一 Module / Tool 描述、权限、副作用和审计契约。 |
 
@@ -33,7 +33,7 @@ Experience Plane
 | Experience | 继续使用 `src/Presentations/*`。 |
 | Host Gateway | 继续使用 `src/Core/TianShu.HostGateway`，宿主进程使用 `src/Hosting/TianShu.AppHost`。 |
 | Control Plane | 继续使用 `src/Core/TianShu.ControlPlane.Abstractions` 与 `src/Core/TianShu.ControlPlane`。 |
-| Kernel | 新建 `TianShu.Contracts.Kernel`、`TianShu.Kernel.Abstractions`、`TianShu.Kernel`、`TianShu.Kernel.Adaptive`、`TianShu.Kernel.Strategies`。 |
+| Kernel | 使用 `TianShu.Contracts.Kernel`、`TianShu.Kernel.Abstractions`、`TianShu.Kernel`、`TianShu.Kernel.Adaptive`、`TianShu.Kernel.Strategies`。 |
 | Execution Runtime | 继续使用 `src/Execution/TianShu.Execution.Runtime` 与 `src/Execution/TianShu.Execution.Protocol`。 |
 | Module Plane | 能力契约进入对应 `TianShu.Contracts.*`；默认实现进入 `Provider`、`Tools`、`Core` 下的模块项目。 |
 
@@ -55,8 +55,10 @@ Experience Plane
 | Host Gateway | `docs/architecture/tianshu-host-gateway-design.md` |
 | Control Plane | `docs/architecture/tianshu-control-plane-design.md` |
 | Kernel / Core Loop | `docs/architecture/tianshu-kernel-core-loop-design.md` |
+| Self Evolution / Adaptive Strategy | `docs/architecture/tianshu-self-evolution-design.md` |
 | Execution Runtime | `docs/architecture/tianshu-execution-runtime-design.md` |
 | Module Plane | `docs/architecture/tianshu-module-plane-design.md` |
+| Remote Continuity | `docs/architecture/tianshu-remote-continuity-design.md` |
 | Contracts | `docs/architecture/tianshu-contracts-architecture.md` |
 | AppHost / Hosting | `docs/hosting/tianshu-apphost-hosting-design.md` |
 | Provider Module | `docs/provider/tianshu-provider-module-design.md` |

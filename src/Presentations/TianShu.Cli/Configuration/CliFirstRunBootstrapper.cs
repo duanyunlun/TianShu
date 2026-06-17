@@ -76,7 +76,7 @@ internal static class CliFirstRunBootstrapper
             Id: ProviderOpenAi,
             DisplayName: "OpenAI Responses",
             Model: "gpt-5.5",
-            RouteProtocol: "responses",
+            RouteProtocol: "openai_responses",
             WireApi: "openai_responses",
             BaseUrl: "https://api.openai.com",
             ApiKeyEnvironmentVariable: "OPENAI_API_KEY"),

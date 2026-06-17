@@ -7,10 +7,10 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](#路线图)
+[![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)](#路线图)
 [![Architecture](https://img.shields.io/badge/architecture-6--plane-success.svg)](docs/tianshu-architecture-spec.md)
 
-[中文](#中文文档) · [English](#english) · [快速开始](#快速开始) · [模块接入](docs/usage/modules.md) · [架构规范](docs/tianshu-architecture-spec.md)
+[中文](#中文文档) · [English](#english) · [快速开始](docs/usage/quickstart.md) · [模块接入](docs/usage/modules.md) · [架构规范](docs/tianshu-architecture-spec.md) · [故障排查](docs/usage/troubleshooting.md)
 
 </div>
 
@@ -85,7 +85,7 @@ tianshu doctor --probe
 tianshu send --message "帮我分析这个仓库的结构" --json
 ```
 
-`tianshu doctor` 默认离线执行，不联网、不调用模型、不产生 API 成本；`tianshu doctor --probe` 才会显式联网探测 endpoint/auth/protocol 基础可达性。凭据缺失时，天枢会**失败关闭**并给出明确 failure code，例如 `provider_api_key_missing`。
+`tianshu doctor` 默认离线执行，不联网、不调用模型、不产生 API 成本；它会同时报告 Provider 配置、模块发现/加载、模块健康、缺失配置、治理风险与修复建议。`tianshu doctor --probe` 才会显式联网探测 endpoint/auth/protocol 基础可达性。凭据缺失时，天枢会**失败关闭**并给出明确 failure code，例如 `provider_api_key_missing`。
 
 #### Windows 清理
 
@@ -99,9 +99,13 @@ tianshu init --provider openai --force
 
 | 我想…… | 看这里 |
 | --- | --- |
+| 安装、初始化、自检和发送第一条消息 | **[快速开始](docs/usage/quickstart.md)** |
 | 接入自定义模型 / 工具 / 能力模块 | **[模块接入指南](docs/usage/modules.md)** |
 | 了解配置结构与 provider 切换 | [快速开始 · 首次配置](#快速开始) |
 | 理解整体架构与设计取舍 | [它如何工作](#它如何工作) · [架构规范](docs/tianshu-architecture-spec.md) |
+| 排查 provider、模块、写工具、Sub-Agent 或 Release 包问题 | [故障排查](docs/usage/troubleshooting.md) |
+| 理解默认安全边界、secret 处理和治理模型 | [安全模型](docs/security/tianshu-security-model.md) |
+| 查看发布变化、验证状态和已知限制 | [Release Notes](docs/publishing/release-notes.md) |
 
 > 天枢的核心特性之一是**模块化**:你可以在不修改内核的前提下,接入自己的 Provider、Tool 与能力模块。如果你想扩展天枢,[模块接入指南](docs/usage/modules.md) 是最佳起点。
 
@@ -156,12 +160,14 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 | [控制层设计](docs/architecture/tianshu-control-plane-design.md) | operation 归一化、治理、路由 |
 | [宿主网关设计](docs/architecture/tianshu-host-gateway-design.md) | typed host surface 投影 |
 | [契约架构](docs/architecture/tianshu-contracts-architecture.md) | 跨层类型化契约边界 |
+| [安全模型](docs/security/tianshu-security-model.md) | 默认能力边界、secret 处理、模块信任和 RuntimeStep 审批 |
+| [Release Notes](docs/publishing/release-notes.md) | 用户可见变化、验证状态与已知限制 |
 
 ### 路线图
 
-当前版本 **v0.5.0**。路线图按版本推进,**先把「模块化」和「受治理能力面」做扎实,再补齐远程连续性与多 Agent 协作,最后攻「自演化」(开放难题,压轴推进)**。
+当前公开发布版本 **v0.9.1**。这是面向公开仓库的 CLI / Windows x64 便携包发布基线。v0.6-v0.9 的模块化、受治理能力面、远程连续性接口和多 Agent 机制已进入发布门禁；v0.10 自演化仍是探索性基础设施，v1.0 稳定化继续收口。
 
-#### ✅ v0.5.0 · 可控内核可用(当前)
+#### ✅ v0.5.0 · 可控内核可用
 
 - [x] 可控演化内核 + StageGraph IR(双子层:稳定内核 + 编排层)
 - [x] 六层主链架构 + 源码级架构守护测试
@@ -173,36 +179,39 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 
 #### 🧩 v0.6.0 · 模块化开放
 
-- [ ] Module SDK + 模板项目,第三方可在不碰内核的前提下开发模块
-- [ ] Provider 模块公开接入规范 + 从零写一个自定义 provider 教程
-- [ ] Tool 模块公开接入规范 + 注册一个自定义工具教程
-- [ ] Memory 模块公开接入规范
-- [ ] 模块发现 / 加载 / 治理的稳定公开契约
-- [ ] 模块装配文档(组合层注入、信任边界、健康检查)
+- [x] Module SDK + 模板 / 示例项目,第三方可在不碰内核的前提下开发模块
+- [x] Provider 模块公开接入规范 + 从零写一个自定义 provider 教程
+- [x] Tool 模块公开接入规范 + 注册一个自定义工具教程
+- [x] Memory 模块公开接入规范
+- [x] 模块发现 / 加载 / 治理的稳定公开契约
+- [x] 模块装配文档(组合层注入、信任边界、健康检查)
 
 #### 🛠 v0.7.0 · 能力面扩展
 
-- [ ] 受治理的 write / apply_patch(审批 + 工作区沙箱 + 冲突/回滚)
-- [ ] 受治理的 shell(命令审批 + cwd 限制 + 环境脱敏 + 输出截断)
-- [ ] MCP 接入(resource 只读接入 + tool 远端副作用治理)
-- [ ] 结构化上下文管理(token 作压缩触发器 + 分层降级 + supersede 取舍,压缩可逆可审计)
-- [ ] Memory 模块能力开放(检索 / 形成 / 取代)
+- [x] 受治理的 write / apply_patch(审批 + 工作区沙箱 + 冲突/回滚)
+- [x] 受治理的 shell(命令审批 + cwd 限制 + 环境脱敏 + 输出截断)
+- [x] MCP 接入(resource 只读接入 + tool 远端副作用治理)
+- [x] 结构化上下文管理(token 作压缩触发器 + 分层降级 + supersede 取舍,压缩可逆可审计)
+- [x] Memory 模块能力开放(检索 / 形成 / 取代)
 
 #### 📡 v0.8.0 · 远程连续性接口与 Remote Module
 
-- [ ] 线程状态投影接口:thread snapshot、run state、stage/tool/sub-agent 状态、pending approval、artifact、diagnostics
-- [ ] 事件流订阅接口:SSE/WebSocket/event cursor/reconnect,远端设备可只读跟随当前工作线程
-- [ ] 远程控制命令:submit message、steer、interrupt、resume、approval decision,全部回到 Host Gateway / Control Plane
-- [ ] Remote Module 示例实现:可替换的远端收发模块,承载 HTTP/SSE/WebSocket、device pairing、短期 token、会话撤销
-- [ ] 远端安全边界:远端不直接访问本地 workspace/runtime state,不绕过 Kernel/Runtime,高风险动作继续走 human gate
-- [ ] 多宿主体验收敛:VS 扩展(VSSDK Sidecar + VSExtension)、Config GUI、AppHost 作为 Host Gateway 消费端接入
-- [ ] 移动端/Web/云中继作为消费形态,不要求移动设备本地执行工作负载
+- [x] 线程状态投影接口:thread snapshot、run state、stage/tool/sub-agent 状态、pending approval、artifact、diagnostics
+- [x] 事件流订阅接口:SSE/WebSocket/event cursor/reconnect,远端设备可只读跟随当前工作线程
+- [x] 远程控制命令:submit message、steer、interrupt、resume、approval decision,全部回到 Host Gateway / Control Plane
+- [x] Remote Module 示例实现:可替换的远端收发模块,承载 HTTP/SSE/WebSocket、device pairing、短期 token、会话撤销
+- [x] 远端安全边界:远端不直接访问本地 workspace/runtime state,不绕过 Kernel/Runtime,高风险动作继续走 human gate
+- [x] 多宿主体验收敛:VS 扩展(VSSDK Sidecar + VSExtension)、Config GUI、AppHost 作为 Host Gateway 消费端接入
+- [x] 移动端/Web/云中继作为消费形态,不要求移动设备本地执行工作负载
 
-#### 🤝 v0.9.0 · 多 Agent 成熟
+远程连续性的边界是**状态/控制接口 + 可替换 Remote Module**。移动端、Web 页面或云中继只负责查看脱敏线程状态、订阅事件、提交 follow-up/interrupt/resume/approval 等受治理命令；模型调用、工具执行、workspace 读写、artifact 生成和审计记录仍发生在运行 TianShu 的本机或受控宿主内。云中继也只是 transport adapter,不拥有内核控制权。
 
-- [ ] 并行 fanout(激活 `maxConcurrentAgents` 并发闸门 + 结果 fan-in)
-- [ ] sub-agent 自主触发观测矩阵(v0.5 已完成串行基线观测:27 次 / 0 自主触发;v0.9 在并行 fanout 场景下扩展多协议 × 多任务 × 多轮观测,诚实记录触发率)
-- [ ] 子树治理 / 预算切分 / 整树复盘完善
+#### ✅ v0.9.0 · 多 Agent 成熟
+
+- [x] 并行 fanout(激活 `maxConcurrentAgents` 并发闸门 + 结果 fan-in)
+- [x] sub-agent 自主触发观测矩阵(v0.5 已完成串行基线观测:27 次 / 0 自主触发;v0.9 在并行 fanout 场景下扩展多协议 × 多任务 × 多轮观测,诚实记录触发率)
+- [x] 子树治理 / 预算切分 / 整树复盘完善
+- [x] v0.9 多 Agent 发布门禁:默认不暴露 `spawn_agent`,仅在 `--enable-subagents --approve-all` 与治理同时授权时开放;确定性 fanout/fan-in 机制必过,live 自主触发只作为公开观察报告记录,不承诺一定触发
 
 #### 🧬 v0.10.0 · 自演化基础设施(探索中)
 
@@ -214,13 +223,13 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 - [ ] 统计聚合:从单次结果评审上升到「策略 X 优于策略 Y」的判断
 - [ ] strategy registry:promotion / rollback 生命周期
 
-> ⚠️ 自演化方向尚无业界定论,以上为**探索性目标,可行性待验证,不承诺成功**。
+> ⚠️ 自演化方向尚无业界定论。P31.8 正式报告当前结论为**部分可行**:受控实验链路可行,真实长期收益和可靠自主进化仍未证明,不承诺成功。
 
 #### 🚀 v1.0.0 · 稳定 + 自演化可行性结论
 
 - [ ] 核心 API 稳定承诺 + 版本兼容策略
 - [ ] 模块生态成型(若干示范第三方模块)
-- [ ] **自演化可行性报告**(无论结论是「可行」还是「当前无法测量」,该报告本身即里程碑)
+- [ ] **自演化可行性报告**(当前结论:部分可行;控制链路可行,收益可测性和可靠自主进化仍未证明)
 - [ ] 生产级文档与发布门禁
 
 > 自演化是天枢最有野心的方向。天枢的态度是:**保留它所需的全部架构挂载点,诚实地分阶段推进,不在能客观度量收益之前伪装它已成功。**
@@ -316,7 +325,7 @@ tianshu doctor --probe
 tianshu send --message "Analyze the structure of this repository" --json
 ```
 
-`tianshu doctor` is offline by default: no network, no model call, no API cost. `tianshu doctor --probe` explicitly performs a network probe for endpoint/auth/protocol reachability. When credentials are missing, TianShu **fails closed** with an explicit failure code such as `provider_api_key_missing`.
+`tianshu doctor` is offline by default: no network, no model call, no API cost. It also reports provider configuration, module discovery/loading, module health, missing configuration, governance risks, and repair suggestions. `tianshu doctor --probe` explicitly performs a network probe for endpoint/auth/protocol reachability. When credentials are missing, TianShu **fails closed** with an explicit failure code such as `provider_api_key_missing`.
 
 #### Windows cleanup
 
@@ -330,9 +339,13 @@ tianshu init --provider openai --force
 
 | I want to… | Go to |
 | --- | --- |
+| Install, initialize, self-check, and send the first message | **[Quickstart](docs/usage/quickstart.md)** |
 | Plug in a custom model / tool / capability module | **[Module Integration Guide](docs/usage/modules.md)** |
 | Understand config layout & provider switching | [Quick Start · First-run configuration](#quick-start) |
 | Understand the overall architecture & trade-offs | [How It Works](#how-it-works) · [Architecture Spec](docs/tianshu-architecture-spec.md) |
+| Troubleshoot provider, module, write-tool, Sub-Agent, or Release package issues | [Troubleshooting](docs/usage/troubleshooting.md) |
+| Understand default safety boundaries, secret handling, and governance | [Security Model](docs/security/tianshu-security-model.md) |
+| Read release changes, validation status, and known limitations | [Release Notes](docs/publishing/release-notes.md) |
 
 > One of TianShu's core features is **modularity**: you can plug in your own Provider, Tool, and capability modules without modifying the kernel. The [Module Integration Guide](docs/usage/modules.md) is the best starting point.
 
@@ -377,9 +390,9 @@ prepare-context  →  model-reason  ⇄  tool-exec  →  finalize
 
 ### Roadmap
 
-Current version **v0.5.0**. The roadmap advances by version, **solidifying modularity and governed capability surfaces first, then adding remote continuity and multi-agent collaboration, and only then tackling self-evolution (an open problem, saved for last)**.
+Current public release **v0.9.1**. This is the public-repository baseline for the CLI / Windows x64 portable package. v0.6-v0.9 modularity, governed capability surfaces, remote continuity interfaces, and multi-agent mechanisms are now covered by release gates; v0.10 self-evolution remains exploratory infrastructure, and v1.0 stabilization continues.
 
-#### ✅ v0.5.0 · Controlled kernel usable (current)
+#### ✅ v0.5.0 · Controlled kernel usable
 
 - [x] Controlled-evolution kernel + StageGraph IR (dual sublayer: stable core + orchestration layer)
 - [x] Six-plane architecture + source-level architecture guard tests
@@ -391,36 +404,39 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 
 #### 🧩 v0.6.0 · Modularity opened
 
-- [ ] Module SDK + template projects; third parties author modules without touching the kernel
-- [ ] Public Provider integration spec + "write a custom provider from scratch" tutorial
-- [ ] Public Tool integration spec + "register a custom tool" tutorial
-- [ ] Public Memory module integration spec
-- [ ] Stable public contracts for module discovery / loading / governance
-- [ ] Module composition docs (composition-root injection, trust boundaries, health checks)
+- [x] Module SDK + template projects; third parties author modules without touching the kernel
+- [x] Public Provider integration spec + "write a custom provider from scratch" tutorial
+- [x] Public Tool integration spec + "register a custom tool" tutorial
+- [x] Public Memory module integration spec
+- [x] Stable public contracts for module discovery / loading / governance
+- [x] Module composition docs (composition-root injection, trust boundaries, health checks)
 
 #### 🛠 v0.7.0 · Capability surface expansion
 
-- [ ] Governed write / apply_patch (approval + workspace sandbox + conflict/rollback)
-- [ ] Governed shell (command approval + cwd restriction + env redaction + output truncation)
-- [ ] MCP integration (read-only resource access + governed remote-side-effect tools)
-- [ ] Structured context management (token as compaction trigger + tiered demotion + supersede-based pruning, reversible & auditable)
-- [ ] Memory module capabilities opened (retrieve / form / supersede)
+- [x] Governed write / apply_patch (approval + workspace sandbox + conflict/rollback)
+- [x] Governed shell (command approval + cwd restriction + env redaction + output truncation)
+- [x] MCP integration (read-only resource access + governed remote-side-effect tools)
+- [x] Structured context management (token as compaction trigger + tiered demotion + supersede-based pruning, reversible & auditable)
+- [x] Memory module capabilities opened (retrieve / form / supersede)
 
 #### 📡 v0.8.0 · Remote continuity interfaces and Remote Module
 
-- [ ] Thread state projection interfaces: thread snapshot, run state, stage/tool/sub-agent state, pending approvals, artifacts, diagnostics
-- [ ] Event stream subscriptions: SSE/WebSocket/event cursor/reconnect so remote devices can follow the active work thread read-only
-- [ ] Remote control commands: submit message, steer, interrupt, resume, approval decision, all routed back through Host Gateway / Control Plane
-- [ ] Reference Remote Module implementation: replaceable remote send/receive module for HTTP/SSE/WebSocket, device pairing, short-lived tokens, session revocation
-- [ ] Remote safety boundary: remote clients do not directly access local workspace/runtime state, cannot bypass Kernel/Runtime, and high-risk actions still go through human gate
-- [ ] Multi-host experience convergence: VS extension (VSSDK Sidecar + VSExtension), Config GUI, and AppHost connect as Host Gateway consumers
-- [ ] Mobile, Web, and cloud relay are consumption forms; mobile devices are not required to execute local workloads
+- [x] Thread state projection interfaces: thread snapshot, run state, stage/tool/sub-agent state, pending approvals, artifacts, diagnostics
+- [x] Event stream subscriptions: SSE/WebSocket/event cursor/reconnect so remote devices can follow the active work thread read-only
+- [x] Remote control commands: submit message, steer, interrupt, resume, approval decision, all routed back through Host Gateway / Control Plane
+- [x] Reference Remote Module implementation: replaceable remote send/receive module for HTTP/SSE/WebSocket, device pairing, short-lived tokens, session revocation
+- [x] Remote safety boundary: remote clients do not directly access local workspace/runtime state, cannot bypass Kernel/Runtime, and high-risk actions still go through human gate
+- [x] Multi-host experience convergence: VS extension (VSSDK Sidecar + VSExtension), Config GUI, and AppHost connect as Host Gateway consumers
+- [x] Mobile, Web, and cloud relay are consumption forms; mobile devices are not required to execute local workloads
 
-#### 🤝 v0.9.0 · Multi-agent maturation
+The remote-continuity boundary is **state/control interfaces + replaceable Remote Modules**. Mobile clients, Web pages, and cloud relays only view redacted thread state, subscribe to events, and submit governed commands such as follow-up, interrupt, resume, or approval decisions. Model calls, tool execution, workspace access, artifact generation, and audit records still happen on the machine or controlled host running TianShu. A cloud relay is only a transport adapter; it does not own kernel control.
 
-- [ ] Parallel fanout (activate `maxConcurrentAgents` gate + result fan-in)
-- [ ] Sub-agent autonomous-trigger observation matrix (v0.5 completed the serial baseline observation: 27 runs / 0 autonomous triggers; v0.9 expands observation across multi-protocol × multi-task × multi-round parallel fanout scenarios, honestly recording trigger rate)
-- [ ] Sub-tree governance / budget split / whole-tree replay refinement
+#### ✅ v0.9.0 · Multi-agent maturation
+
+- [x] Parallel fanout (activate `maxConcurrentAgents` gate + result fan-in)
+- [x] Sub-agent autonomous-trigger observation matrix (v0.5 completed the serial baseline observation: 27 runs / 0 autonomous triggers; v0.9 expands observation across multi-protocol × multi-task × multi-round parallel fanout scenarios, honestly recording trigger rate)
+- [x] Sub-tree governance / budget split / whole-tree replay refinement
+- [x] v0.9 multi-agent release gate: hide `spawn_agent` by default, expose it only with `--enable-subagents --approve-all` plus governance authorization; deterministic fanout/fan-in must pass, while live autonomous triggering is recorded as a public observation report without promising it will happen
 
 #### 🧬 v0.10.0 · Self-evolution infrastructure (exploratory)
 
@@ -432,13 +448,13 @@ Current version **v0.5.0**. The roadmap advances by version, **solidifying modul
 - [ ] Statistical aggregation: rise from single-result review to "strategy X is better than strategy Y"
 - [ ] Strategy registry: promotion / rollback lifecycle
 
-> ⚠️ Self-evolution has no industry consensus yet; the above are **exploratory goals — feasibility to be validated, success not promised**.
+> ⚠️ Self-evolution has no industry consensus yet. The P31.8 report currently concludes **partially feasible**: the governed experiment loop is feasible, while long-term benefit and reliable autonomous evolution remain unproven.
 
 #### 🚀 v1.0.0 · Stable + self-evolution feasibility conclusion
 
 - [ ] Core API stability commitment + version compatibility policy
 - [ ] Mature module ecosystem (several reference third-party modules)
-- [ ] **Self-evolution feasibility report** (whether "feasible" or "currently unmeasurable", the report itself is the milestone)
+- [ ] **Self-evolution feasibility report** (current conclusion: partially feasible; the control loop is feasible, while measurable benefit and reliable autonomous evolution remain unproven)
 - [ ] Production-grade docs and release gating
 
 > Self-evolution is TianShu's most ambitious direction. The stance: **retain every architectural mount point it needs, advance honestly in phases, and never pretend it has succeeded before its benefit can be objectively measured.**
@@ -460,4 +476,3 @@ Licensed under the **[Apache License 2.0](LICENSE)**.
 <div align="center">
 <sub>天枢 · TianShu — orchestration pivot for trustworthy AI agents</sub>
 </div>
-

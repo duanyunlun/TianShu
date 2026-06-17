@@ -425,6 +425,12 @@ public sealed record ToolDescriptor
             outputSchema: OutputSchemaRef is null ? null : new ModuleSchemaRef(OutputSchemaRef.SchemaId, OutputSchemaRef.Version, OutputSchemaRef.InlineSchema),
             permission: permission,
             sideEffects: SideEffects);
+        var configurationSchema = new ModuleSchemaRef($"tool.{NormalizePolicyToken(Key)}.configuration");
+        var runtimeDependency = new ModuleRuntimeDependency(
+            ImplementationBinding?.ImplementationId ?? Key,
+            $"{DisplayName} implementation",
+            ModuleRuntimeDependencyKind.DotNetAssembly,
+            required: true);
 
         return new ModuleDescriptor(
             Key,
@@ -432,11 +438,21 @@ public sealed record ToolDescriptor
             DisplayName,
             version: "1.0",
             capabilities: [capability],
-            configurationSchema: new ModuleSchemaRef($"tool.{NormalizePolicyToken(Key)}.configuration"),
+            configurationSchema: configurationSchema,
             permission: permission,
             sideEffects: SideEffects,
             audit: new ModuleAuditProfile(Audit.Required, Audit.EventKinds, Audit.RedactSensitiveValues),
             trustLevel: trustLevel,
+            requiredConfiguration:
+            [
+                new ModuleConfigurationRequirement(
+                    $"tool.{NormalizePolicyToken(Key)}.configuration",
+                    $"{DisplayName} configuration",
+                    valueSchema: configurationSchema,
+                    required: false)
+            ],
+            runtimeDependencies: [runtimeDependency],
+            minimumTianShuVersion: "0.6.0",
             health: health,
             implementationBinding: implementationBinding ?? (ImplementationBinding is null
                 ? null

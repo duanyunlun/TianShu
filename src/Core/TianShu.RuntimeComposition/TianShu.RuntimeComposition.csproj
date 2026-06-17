@@ -19,6 +19,7 @@
     <ProjectReference Include="..\TianShu.Configuration\TianShu.Configuration.csproj" />
     <ProjectReference Include="..\TianShu.ControlPlane\TianShu.ControlPlane.csproj" />
     <ProjectReference Include="..\TianShu.Diagnostics\TianShu.Diagnostics.csproj" />
+    <ProjectReference Include="..\TianShu.IdentityMemory\TianShu.IdentityMemory.csproj" />
     <ProjectReference Include="..\TianShu.Kernel\TianShu.Kernel.csproj" />
     <ProjectReference Include="..\..\Execution\TianShu.Execution.Runtime\TianShu.Execution.Runtime.csproj" />
     <ProjectReference Include="..\..\Contracts\TianShu.Contracts.Catalog\TianShu.Contracts.Catalog.csproj" />
@@ -33,6 +34,9 @@
     <ProjectReference Include="..\..\Provider\TianShu.Provider.Abstractions\TianShu.Provider.Abstractions.csproj" />
     <ProjectReference Include="..\..\Tools\TianShu.Tools.FileSystem\TianShu.Tools.FileSystem.csproj" />
     <ProjectReference Include="..\..\Tools\TianShu.Tools.FileSystemMutating\TianShu.Tools.FileSystemMutating.csproj" />
+    <ProjectReference Include="..\..\Tools\TianShu.Tools.Memory\TianShu.Tools.Memory.csproj" />
+    <ProjectReference Include="..\..\Tools\TianShu.Tools.McpResources\TianShu.Tools.McpResources.csproj" />
+    <ProjectReference Include="..\..\Tools\TianShu.Tools.Shell\TianShu.Tools.Shell.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

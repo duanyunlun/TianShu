@@ -103,6 +103,49 @@ public sealed class StableKernelCoreTests
     }
 
     [Fact]
+    public async Task ValidatorRejectsIllegalStrategyTransitionAndPromotionWithoutMetricEvidence()
+    {
+        var validator = new KernelValidator();
+        var intent = CreateIntent(requiresHumanGate: true, approvalIds: new[] { new ApprovalId("approval-001") });
+        var context = new KernelValidationContext(intent);
+        var candidate = new StrategyRecord(
+            new StrategyId("strategy-001"),
+            "Candidate strategy",
+            new StageGraphId("graph-001"));
+
+        var illegal = await validator.ValidateStrategyTransitionAsync(
+            candidate,
+            StrategyLifecycleState.Promoted,
+            CreateStrategyEvidence(humanApproved: true),
+            context);
+        var trial = new StrategyRecord(candidate.StrategyId, candidate.Name, candidate.GraphId, StrategyLifecycleState.Trial);
+        var missingMetrics = await validator.ValidateStrategyTransitionAsync(
+            trial,
+            StrategyLifecycleState.Promoted,
+            new[]
+            {
+                new StrategyTransitionEvidence(
+                    new KernelRunId("run-001"),
+                    new KernelTraceId("trace-001"),
+                    "evidence://promotion/no-metrics",
+                    humanApproved: true),
+            },
+            context);
+        var missingHumanGate = await validator.ValidateStrategyTransitionAsync(
+            trial,
+            StrategyLifecycleState.Promoted,
+            CreateStrategyEvidence(humanApproved: false),
+            context);
+
+        Assert.Equal(KernelValidationDecision.Rejected, illegal.Decision);
+        Assert.Contains(illegal.Issues, issue => issue.Code == "kernel.strategy.illegal_transition");
+        Assert.Equal(KernelValidationDecision.Rejected, missingMetrics.Decision);
+        Assert.Contains(missingMetrics.Issues, issue => issue.Code == "kernel.strategy.missing_evaluation");
+        Assert.Equal(KernelValidationDecision.Rejected, missingHumanGate.Decision);
+        Assert.Contains(missingHumanGate.Issues, issue => issue.Code == "kernel.strategy.missing_human_gate");
+    }
+
+    [Fact]
     public async Task DefaultTurnGraphUsesBuiltinFourStageGraphWithoutCoreLoopShell()
     {
         var validator = new KernelValidator();
@@ -231,6 +274,53 @@ public sealed class StableKernelCoreTests
         Assert.Equal("static_stage_skeleton", toolStep.InputEnvelope.Input.GetProperty("toolDispatchMode").StringValue);
         Assert.Equal("stage.allow_list.first", toolStep.InputEnvelope.Input.GetProperty("selectedCapabilityToolIdSource").StringValue);
         Assert.True(toolStep.InputEnvelope.Input.GetProperty("requiresModelToolRequests").BooleanValue);
+    }
+
+    [Fact]
+    public async Task InterpreterMapsMemoryStagesToOfficialMemoryModuleCapabilities()
+    {
+        var intent = CreateIntent(
+            allowedModuleIds: ["kernel.default", "provider.default", "memory.identity"],
+            maxSideEffectLevel: SideEffectLevel.ExternalMutation);
+        var retrieve = CreateMemoryStage("stage-memory-retrieve", "memory-retrieve", SideEffectLevel.ReadOnly);
+        var form = CreateMemoryStage("stage-memory-form", "memory-form", SideEffectLevel.ExternalMutation);
+        var supersede = CreateMemoryStage("stage-memory-supersede", "memory-supersede", SideEffectLevel.ExternalMutation);
+        var graph = new StageGraph(
+            new StageGraphId("graph-memory"),
+            "1",
+            intent.IntentKind,
+            retrieve.StageId,
+            new[] { retrieve, form, supersede },
+            new[]
+            {
+                new StageEdge(new StageEdgeId("edge-memory-retrieve-form"), retrieve.StageId, form.StageId, new TransitionCondition("memory retrieved"), new TransitionGuard(), StageTransitionKind.Success),
+                new StageEdge(new StageEdgeId("edge-memory-form-supersede"), form.StageId, supersede.StageId, new TransitionCondition("memory formed"), new TransitionGuard(), StageTransitionKind.Success),
+            },
+            new GraphPolicySet(
+                PolicyEnforcementMode.AllowListed,
+                allowedModuleIds: ["memory.identity"],
+                maxSideEffectLevel: SideEffectLevel.ExternalMutation,
+                requiresHumanGate: false),
+            new KernelBudget(tokenBudget: 1_024, timeBudgetMs: 10_000, toolCallBudget: 3),
+            new CheckpointRules(),
+            new RecoveryRules(enabled: false),
+            new EvaluationRules(),
+            new StageGraphMetadata("test", "memory-capability-surface"));
+        var interpreter = new StageGraphInterpreter();
+
+        var plan = await interpreter.InterpretAsync(
+            graph,
+            new KernelInterpreterContext(
+                intent,
+                new KernelRunState(new KernelRunId("run-memory"), intent.IntentId, selectedGraphId: graph.GraphId),
+                new KernelRunOptions(runId: new KernelRunId("run-memory"), requireHumanGate: false)));
+
+        Assert.Equal(3, plan.Steps.Count);
+        AssertMemoryStep(plan.Steps[0], retrieve.StageId, "memory.retrieve", SideEffectLevel.ReadOnly, requiresHumanGate: false, reversible: true);
+        AssertMemoryStep(plan.Steps[1], form.StageId, "memory.form", SideEffectLevel.ExternalMutation, requiresHumanGate: true, reversible: false);
+        AssertMemoryStep(plan.Steps[2], supersede.StageId, "memory.supersede", SideEffectLevel.ExternalMutation, requiresHumanGate: true, reversible: false);
+        var retrieveStep = Assert.IsType<ModuleCapabilityStep>(plan.Steps[0]);
+        Assert.Equal("retrieve memory objective", retrieveStep.InputEnvelope.GetProperty("queryText").StringValue);
     }
 
     [Fact]
@@ -757,4 +847,57 @@ public sealed class StableKernelCoreTests
             new KernelBudget(tokenBudget: 128, timeBudgetMs: 1_000, toolCallBudget: 1),
             new SuccessCriteria(new[] { "ok" }),
             new FailureHandlerRef("fail"));
+
+    private static StageNode CreateMemoryStage(string stageId, string kind, SideEffectLevel sideEffectLevel)
+        => new(
+            new StageId(stageId),
+            kind,
+            kind switch
+            {
+                "memory-retrieve" => "retrieve memory objective",
+                "memory-form" => "form memory objective",
+                _ => "supersede memory objective",
+            },
+            new ContractRef("memory.input", "1"),
+            new ContractRef("memory.output", "1"),
+            Array.Empty<string>(),
+            Array.Empty<string>(),
+            new ModelRoutePolicy(new[] { "route.default" }, "route.default"),
+            new ContextPolicy(maxInputTokens: 128),
+            sideEffectLevel,
+            new KernelBudget(tokenBudget: 128, timeBudgetMs: 1_000, toolCallBudget: 1),
+            new SuccessCriteria(new[] { "ok" }),
+            new FailureHandlerRef("fail"));
+
+    private static IReadOnlyList<StrategyTransitionEvidence> CreateStrategyEvidence(bool humanApproved)
+        =>
+        [
+            new StrategyTransitionEvidence(
+                new KernelRunId("run-001"),
+                new KernelTraceId("trace-001"),
+                "evidence://promotion/001",
+                new[] { "success", "replay_compatible" },
+                humanApproved),
+        ];
+
+    private static void AssertMemoryStep(
+        RuntimeStep step,
+        StageId stageId,
+        string capabilityId,
+        SideEffectLevel sideEffectLevel,
+        bool requiresHumanGate,
+        bool reversible)
+    {
+        var moduleStep = Assert.IsType<ModuleCapabilityStep>(step);
+        Assert.Equal(stageId, moduleStep.SourceStageId);
+        Assert.Equal("memory.identity", moduleStep.ModuleId);
+        Assert.Equal(capabilityId, moduleStep.CapabilityId);
+        Assert.Equal([capabilityId], moduleStep.Permission.Scopes);
+        Assert.Equal(requiresHumanGate, moduleStep.Permission.RequiresHumanGate);
+        Assert.Equal(sideEffectLevel, moduleStep.SideEffect.Level);
+        Assert.Equal(["memory"], moduleStep.SideEffect.AffectedResources);
+        Assert.Equal(reversible, moduleStep.SideEffect.Reversible);
+        Assert.True(moduleStep.SideEffect.RequiresAudit);
+        Assert.Equal(capabilityId, moduleStep.InputEnvelope.GetProperty("memoryCapabilityId").StringValue);
+    }
 }

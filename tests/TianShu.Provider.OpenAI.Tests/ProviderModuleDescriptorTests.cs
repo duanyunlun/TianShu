@@ -39,6 +39,26 @@ public sealed class ProviderModuleDescriptorTests
     }
 
     [Fact]
+    public void ProviderModuleDescriptorFactory_ShouldCreateValidatedAccessManifest()
+    {
+        var manifest = ProviderModuleDescriptorFactory.CreateAccessManifest(
+            OpenAiProviderModuleDescriptor.Descriptor,
+            "openai_responses");
+
+        var result = ProviderModuleAccessValidator.Validate(
+            manifest,
+            OpenAiProviderModuleDescriptor.Descriptor,
+            "default");
+
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.Access);
+        Assert.Equal("openai", result.Access!.Manifest.ProviderId);
+        Assert.Equal("openai_responses", result.Access.ProtocolBinding.WireApi);
+        Assert.NotEmpty(result.Access.ModelRouteSet.Candidates);
+        Assert.Contains(result.Access.ErrorSpecs, static spec => spec.Code == "rate_limited");
+    }
+
+    [Fact]
     public void ProviderModule_InvokeAsync_ShouldOnlyAcceptProviderInvocationRequest()
     {
         var method = typeof(IProviderModule).GetMethod(nameof(IProviderModule.InvokeAsync));

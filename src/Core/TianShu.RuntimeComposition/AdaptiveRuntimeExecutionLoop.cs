@@ -452,6 +452,7 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
         string? lastDiagnosticsRef = null;
         var intentModelInputs = ResolveIntentModelInputs(intent);
         var subAgentLineage = CreateRootSubAgentLineage(kernelResult.RunId);
+        var subAgentBudgetLedger = new SubAgentTreeBudgetLedger();
 
         while (true)
         {
@@ -478,34 +479,64 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
             string? toolPlanFailureCode = null;
             string? toolPlanFailureMessage = null;
             IReadOnlyList<RuntimeStepResult> precomputedToolStepResults = Array.Empty<RuntimeStepResult>();
-            var stagePlan = currentStage.Kind == "tool-exec"
-                ? CreateToolRequestExecutionPlan(
-                    approvedPlan,
-                    currentStage,
-                    pendingToolRequests,
-                    intent,
-                    runtimeContext.Governance,
-                    subAgentLineage,
-                    iteration,
-                    precomputedToolStepResults: out precomputedToolStepResults,
-                    out toolPlanFailureCode,
-                    out toolPlanFailureMessage)
-                : CreateStageExecutionPlan(
-                    approvedPlan,
-                    currentStage.StageId,
-                    iteration,
-                    currentStage.Kind == "model-reason" ? pendingToolEvidence : Array.Empty<ModelToolResult>(),
-                    currentStage.Kind == "model-reason" ? intentModelInputs : Array.Empty<ProviderInputItem>());
-            if (stagePlan is null)
+            ExecutionPlan? stagePlan = null;
+            ExecutionRunResult runtimeResult;
+            if (ShouldExecuteParallelSubAgentFanout(currentStage, pendingToolRequests, subAgentSpawnQuota))
             {
-                return CreateRuntimeFailureResult(
-                    kernelResult,
-                    runtimeContext.ExecutionId,
-                    toolPlanFailureCode ?? "runtime.reactive.stage_steps_missing",
-                    toolPlanFailureMessage ?? $"ExecutionPlan 缺少 stage 对应的 RuntimeStep：{currentStage.StageId.Value}。");
+                var fanoutResult = await ExecuteParallelSubAgentFanoutAsync(
+                        approvedPlan,
+                        currentStage,
+                        pendingToolRequests,
+                        intent,
+                        runtimeContext,
+                        subAgentLineage,
+                        subAgentBudgetLedger,
+                        iteration,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (fanoutResult.RuntimeResult is null)
+                {
+                    return CreateRuntimeFailureResult(
+                        kernelResult,
+                        runtimeContext.ExecutionId,
+                        fanoutResult.FailureCode ?? "runtime.reactive.subagent_fanout_failed",
+                        fanoutResult.FailureMessage ?? "Sub-agent fanout 调度失败。");
+                }
+
+                runtimeResult = fanoutResult.RuntimeResult;
+            }
+            else
+            {
+                stagePlan = currentStage.Kind == "tool-exec"
+                    ? CreateToolRequestExecutionPlan(
+                        approvedPlan,
+                        currentStage,
+                        pendingToolRequests,
+                        intent,
+                        runtimeContext.Governance,
+                        subAgentLineage,
+                        iteration,
+                        precomputedToolStepResults: out precomputedToolStepResults,
+                        out toolPlanFailureCode,
+                        out toolPlanFailureMessage)
+                    : CreateStageExecutionPlan(
+                        approvedPlan,
+                        currentStage.StageId,
+                        iteration,
+                        currentStage.Kind == "model-reason" ? pendingToolEvidence : Array.Empty<ModelToolResult>(),
+                        currentStage.Kind == "model-reason" ? intentModelInputs : Array.Empty<ProviderInputItem>());
+                if (stagePlan is null)
+                {
+                    return CreateRuntimeFailureResult(
+                        kernelResult,
+                        runtimeContext.ExecutionId,
+                        toolPlanFailureCode ?? "runtime.reactive.stage_steps_missing",
+                        toolPlanFailureMessage ?? $"ExecutionPlan 缺少 stage 对应的 RuntimeStep：{currentStage.StageId.Value}。");
+                }
+
+                runtimeResult = await executionRuntime.ExecuteAsync(stagePlan, runtimeContext, cancellationToken).ConfigureAwait(false);
             }
 
-            var runtimeResult = await executionRuntime.ExecuteAsync(stagePlan, runtimeContext, cancellationToken).ConfigureAwait(false);
             if (precomputedToolStepResults.Count > 0)
             {
                 var mergedStepResults = runtimeResult.StepResults.Concat(precomputedToolStepResults).ToArray();
@@ -848,7 +879,7 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
                     continue;
                 }
 
-                steps.Add(CreateSubAgentModuleStep(template, stage, request, intent, governance, subAgentLineage, decision.ChildLineage!, subAgentSpawnQuota, iteration, index));
+                steps.Add(CreateSubAgentModuleStep(template, stage, request, intent, governance, subAgentLineage, decision.ChildLineage!, subAgentSpawnQuota, template.Budget, iteration, index));
                 continue;
             }
 
@@ -904,6 +935,238 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
             approvedPlan.Metadata);
     }
 
+    private static bool ShouldExecuteParallelSubAgentFanout(
+        StageNode stage,
+        IReadOnlyList<ModelToolRequest> toolRequests,
+        SubAgentSpawnQuota quota)
+        => stage.Kind == "tool-exec"
+           && quota.MaxConcurrentAgents > 0
+           && toolRequests.Count > 1
+           && toolRequests.All(static request => string.Equals(request.ToolId, SpawnAgentToolId, StringComparison.Ordinal));
+
+    private async Task<SubAgentFanoutRuntimeExecution> ExecuteParallelSubAgentFanoutAsync(
+        ExecutionPlan approvedPlan,
+        StageNode stage,
+        IReadOnlyList<ModelToolRequest> toolRequests,
+        CoreIntent intent,
+        ExecutionRuntimeContext runtimeContext,
+        SubAgentLineage subAgentLineage,
+        ISubAgentTreeBudgetLedger budgetLedger,
+        int iteration,
+        CancellationToken cancellationToken)
+    {
+        var template = approvedPlan.Steps
+            .OfType<ToolInvocationStep>()
+            .FirstOrDefault(step => step.SourceStageId == stage.StageId);
+        if (template is null)
+        {
+            return SubAgentFanoutRuntimeExecution.Failed(
+                "runtime.reactive.stage_steps_missing",
+                $"ExecutionPlan 缺少 stage 对应的 ToolInvocationStep：{stage.StageId.Value}。");
+        }
+
+        for (var index = 0; index < toolRequests.Count; index++)
+        {
+            var request = toolRequests[index];
+            if (!IsToolAllowed(request.ToolId, stage, runtimeContext.Governance))
+            {
+                return SubAgentFanoutRuntimeExecution.Failed(
+                    "runtime.reactive.tool_request_not_allowed",
+                    $"模型请求的工具不在当前 tool-exec allow-list 或治理边界内：{request.ToolId}。");
+            }
+        }
+
+        var fanoutCallId = $"fanout-{approvedPlan.PlanId}-{iteration:000}-{stage.StageId.Value}";
+        var maxConcurrency = Math.Max(1, subAgentSpawnQuota.MaxConcurrentAgents);
+        var itemTimeout = ResolveSubAgentFanoutItemTimeout(template.Budget);
+        var treeBudget = new SubAgentTreeBudget(
+            template.Budget,
+            Math.Max(1, subAgentSpawnQuota.MaxFanoutPerAgent),
+            subAgentSpawnQuota.MaxSpawnDepth,
+            subAgentSpawnQuota.MaxConcurrentAgents);
+        var budgetSplit = new SubAgentBudgetSplit(SubAgentBudgetSplitMode.EqualShare);
+        var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var jobResults = new SubAgentFanoutJobResult[toolRequests.Count];
+        var tasks = toolRequests
+            .Select((request, index) => ExecuteSubAgentFanoutJobAsync(
+                approvedPlan,
+                stage,
+                template,
+                request,
+                intent,
+                runtimeContext,
+                subAgentLineage,
+                budgetLedger,
+                treeBudget,
+                budgetSplit,
+                fanoutCallId,
+                toolRequests.Count,
+                itemTimeout,
+                semaphore,
+                iteration,
+                index,
+                cancellationToken))
+            .ToArray();
+
+        var completedJobs = await Task.WhenAll(tasks).ConfigureAwait(false);
+        foreach (var job in completedJobs)
+        {
+            jobResults[job.Index] = job;
+        }
+
+        var fanInSummary = CreateSubAgentFanInSummary(fanoutCallId, toolRequests, jobResults);
+        var treeDiagnostics = CreateSubAgentTreeDiagnostics(
+            fanoutCallId,
+            subAgentLineage,
+            subAgentSpawnQuota,
+            treeBudget,
+            fanInSummary);
+        var enrichedJobResults = jobResults
+            .Select(job => job with { StepResult = AttachSubAgentFanInSummaryToToolResult(job.StepResult, fanInSummary, treeDiagnostics) })
+            .ToArray();
+        var stepResults = enrichedJobResults
+            .Select(static job => job.StepResult)
+            .Append(CreateSubAgentFanoutDiagnosticsStepResult(template, runtimeContext, fanoutCallId, maxConcurrency, itemTimeout, enrichedJobResults, treeDiagnostics))
+            .Append(CreateSubAgentFanInSummaryStepResult(template, fanInSummary, treeDiagnostics))
+            .ToArray();
+
+        return SubAgentFanoutRuntimeExecution.Succeeded(new ExecutionRunResult(
+            $"{approvedPlan.PlanId}-stage-{iteration:000}-{stage.StageId.Value}-subagent-fanout",
+            runtimeContext.ExecutionId,
+            ResolveMergedRunStatus(stepResults),
+            stepResults,
+            diagnosticsRef: $"diagnostics://runtime-composition/subagent/tree/{fanoutCallId}",
+            traceRef: $"trace://runtime-composition/subagent/fanout/{fanoutCallId}"));
+    }
+
+    private async Task<SubAgentFanoutJobResult> ExecuteSubAgentFanoutJobAsync(
+        ExecutionPlan approvedPlan,
+        StageNode stage,
+        ToolInvocationStep template,
+        ModelToolRequest request,
+        CoreIntent intent,
+        ExecutionRuntimeContext runtimeContext,
+        SubAgentLineage subAgentLineage,
+        ISubAgentTreeBudgetLedger budgetLedger,
+        SubAgentTreeBudget treeBudget,
+        SubAgentBudgetSplit budgetSplit,
+        string fanoutCallId,
+        int plannedSubTaskCount,
+        TimeSpan itemTimeout,
+        SemaphoreSlim semaphore,
+        int iteration,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SubAgentLineage? childLineage = null;
+        KernelBudget? allocatedBudget = null;
+        var startedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            var spawnDecision = subAgentSpawnLedger.TryAdmitSpawn(subAgentLineage, subAgentSpawnQuota);
+            if (!spawnDecision.Admitted)
+            {
+                var blockedResult = CreateBlockedSubAgentToolResult(template, request, spawnDecision, iteration, index);
+                return new SubAgentFanoutJobResult(index, request.CallId, null, null, "blocked", spawnDecision.FailureCode, blockedResult, startedAt, DateTimeOffset.UtcNow);
+            }
+
+            var admittedChildLineage = spawnDecision.ChildLineage!;
+            childLineage = admittedChildLineage;
+            var budgetDecision = budgetLedger.TryAllocateForChild(
+                subAgentLineage,
+                treeBudget,
+                budgetSplit,
+                plannedSubTaskCount);
+            if (!budgetDecision.Admitted)
+            {
+                var blockedResult = CreateBlockedSubAgentToolResult(
+                    template,
+                    request,
+                    budgetDecision.FailureCode ?? "subagent.tree_budget_exhausted",
+                    budgetDecision.FailureMessage ?? "sub-agent 子预算分配被拒绝。",
+                    iteration,
+                    index);
+                return new SubAgentFanoutJobResult(index, request.CallId, admittedChildLineage.CurrentRunId, null, "blocked", budgetDecision.FailureCode, blockedResult, startedAt, DateTimeOffset.UtcNow);
+            }
+
+            allocatedBudget = budgetDecision.AllocatedBudget!;
+            var moduleStep = CreateSubAgentModuleStep(
+                template,
+                stage,
+                request,
+                intent,
+                runtimeContext.Governance,
+                subAgentLineage,
+                admittedChildLineage,
+                subAgentSpawnQuota,
+                allocatedBudget,
+                iteration,
+                index,
+                new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+                {
+                    ["subAgent.fanout.callId"] = StructuredValue.FromString(fanoutCallId),
+                    ["subAgent.fanout.itemIndex"] = StructuredValue.FromPlainObject(index),
+                    ["subAgent.fanout.itemCount"] = StructuredValue.FromPlainObject(plannedSubTaskCount),
+                    ["subAgent.fanout.maxConcurrentAgents"] = StructuredValue.FromPlainObject(subAgentSpawnQuota.MaxConcurrentAgents),
+                    ["subAgent.fanout.allocatedBudget"] = StructuredValue.FromPlainObject(CreateBudgetPlainObject(allocatedBudget)),
+                });
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(itemTimeout);
+            var itemPlan = new ExecutionPlan(
+                $"{approvedPlan.PlanId}-stage-{iteration:000}-{stage.StageId.Value}-subagent-fanout-{index + 1:000}",
+                approvedPlan.SourceGraphId,
+                approvedPlan.SourceIntentId,
+                [moduleStep],
+                approvedPlan.Policy,
+                approvedPlan.TracePolicy,
+                new MetadataBag(new Dictionary<string, StructuredValue>(approvedPlan.Metadata.Entries, StringComparer.Ordinal)
+                {
+                    ["subAgent.fanout.callId"] = StructuredValue.FromString(fanoutCallId),
+                    ["subAgent.fanout.itemIndex"] = StructuredValue.FromPlainObject(index),
+                    ["subAgent.fanout.itemCount"] = StructuredValue.FromPlainObject(plannedSubTaskCount),
+                }));
+
+            try
+            {
+                var runResult = await executionRuntime.ExecuteAsync(itemPlan, runtimeContext, timeout.Token).ConfigureAwait(false);
+                var rawStepResult = runResult.StepResults.FirstOrDefault()
+                    ?? CreateBlockedSubAgentToolResult(
+                        template,
+                        request,
+                        "subagent.fanout_step_result_missing",
+                        "sub-agent fanout 子执行未返回 step result。",
+                        iteration,
+                        index);
+                var stepResult = EnsureSubAgentFanoutToolResult(template, request, rawStepResult, iteration, index, childLineage.CurrentRunId);
+                return new SubAgentFanoutJobResult(index, request.CallId, admittedChildLineage.CurrentRunId, allocatedBudget, ResolveSubAgentToolStatus(stepResult), stepResult.Failure?.Code, stepResult, startedAt, DateTimeOffset.UtcNow);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                var timeoutResult = CreateTerminalSubAgentToolResult(
+                    template,
+                    request,
+                    RuntimeStepResultStatus.Succeeded,
+                    "timeout",
+                    "subagent.item_timeout",
+                    "sub-agent fanout 子任务超过 item timeout。",
+                    iteration,
+                    index,
+                    admittedChildLineage.CurrentRunId);
+                return new SubAgentFanoutJobResult(index, request.CallId, admittedChildLineage.CurrentRunId, allocatedBudget, "timeout", "subagent.item_timeout", timeoutResult, startedAt, DateTimeOffset.UtcNow);
+            }
+        }
+        finally
+        {
+            if (childLineage is not null)
+            {
+                subAgentSpawnLedger.OnChildTerminated(childLineage.CurrentRunId);
+            }
+
+            semaphore.Release();
+        }
+    }
+
     private static ModuleCapabilityStep CreateSubAgentModuleStep(
         ToolInvocationStep template,
         StageNode stage,
@@ -913,8 +1176,10 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
         SubAgentLineage parentLineage,
         SubAgentLineage childLineage,
         SubAgentSpawnQuota quota,
+        KernelBudget budget,
         int iteration,
-        int index)
+        int index,
+        IReadOnlyDictionary<string, StructuredValue>? extraMetadata = null)
     {
         var permission = new PermissionEnvelope(
             [SubAgentModuleId],
@@ -929,19 +1194,800 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
             template.SourceKernelOperationId,
             SubAgentModuleId,
             SubAgentCapabilityId,
-            CreateSubAgentSpawnRequestInput(request, intent, governance, parentLineage, template.Budget),
+            CreateSubAgentSpawnRequestInput(request, intent, governance, parentLineage, budget),
             permission,
             sideEffect,
-            template.Budget,
+            budget,
             new ContractRef("sub_agent.spawn.output", "v1"),
             template.TracePolicy,
-            new MetadataBag(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+            new MetadataBag(MergeMetadata(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
             {
                 ["toolDispatchMode"] = StructuredValue.FromString("model_tool_request"),
                 ["modelToolCallId"] = StructuredValue.FromString(request.CallId),
                 ["subAgent.childLineage"] = CreateLineageValue(childLineage),
                 ["subAgent.quota"] = StructuredValue.FromPlainObject(CreateQuotaPlainObject(quota)),
+                ["subAgent.allocatedBudget"] = StructuredValue.FromPlainObject(CreateBudgetPlainObject(budget)),
+            }, extraMetadata)));
+    }
+
+    private static Dictionary<string, StructuredValue> MergeMetadata(
+        Dictionary<string, StructuredValue> metadata,
+        IReadOnlyDictionary<string, StructuredValue>? extraMetadata)
+    {
+        if (extraMetadata is null)
+        {
+            return metadata;
+        }
+
+        foreach (var pair in extraMetadata)
+        {
+            metadata[pair.Key] = pair.Value;
+        }
+
+        return metadata;
+    }
+
+    private static TimeSpan ResolveSubAgentFanoutItemTimeout(KernelBudget budget)
+        => budget.TimeBudgetMs > 0
+            ? TimeSpan.FromMilliseconds(Math.Max(1, budget.TimeBudgetMs))
+            : TimeSpan.FromSeconds(30);
+
+    private static RuntimeStepResult EnsureSubAgentFanoutToolResult(
+        ToolInvocationStep template,
+        ModelToolRequest request,
+        RuntimeStepResult stepResult,
+        int iteration,
+        int index,
+        string childRunId)
+    {
+        if (stepResult.Output is not null && stepResult.Output.TryGetProperty("toolResults", out _))
+        {
+            return stepResult;
+        }
+
+        var failure = stepResult.Failure ?? new ExecutionFailure(
+            stepResult.Status == RuntimeStepResultStatus.Cancelled
+                ? "subagent.child_cancelled"
+                : "subagent.child_step_not_materialized",
+            $"sub-agent fanout 子任务未物化 toolResults，step 状态为 {stepResult.Status}。");
+        var toolStatus = stepResult.Status switch
+        {
+            RuntimeStepResultStatus.Cancelled => "cancelled",
+            RuntimeStepResultStatus.Blocked => "blocked",
+            RuntimeStepResultStatus.Failed => "failed",
+            _ => "failed",
+        };
+        return CreateTerminalSubAgentToolResult(
+            template,
+            request,
+            RuntimeStepResultStatus.Succeeded,
+            toolStatus,
+            failure.Code,
+            failure.Message,
+            iteration,
+            index,
+            childRunId);
+    }
+
+    private static string ResolveSubAgentToolStatus(RuntimeStepResult stepResult)
+    {
+        if (stepResult.Output is not null
+            && stepResult.Output.TryGetProperty("toolResults", out var results)
+            && results is not null
+            && results.Kind == StructuredValueKind.Array
+            && results.Items.Count > 0)
+        {
+            var first = results.Items[0];
+            if (first.TryGetProperty("status", out var statusValue) && statusValue is not null)
+            {
+                var status = statusValue.GetString();
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    return status!;
+                }
+            }
+        }
+
+        return stepResult.Status.ToString();
+    }
+
+    private static RuntimeStepResult CreateBlockedSubAgentToolResult(
+        ToolInvocationStep template,
+        ModelToolRequest request,
+        string failureCode,
+        string failureMessage,
+        int iteration,
+        int index)
+        => CreateTerminalSubAgentToolResult(
+            template,
+            request,
+            RuntimeStepResultStatus.Succeeded,
+            "blocked",
+            failureCode,
+            failureMessage,
+            iteration,
+            index,
+            childRunId: null);
+
+    private static RuntimeStepResult CreateTerminalSubAgentToolResult(
+        ToolInvocationStep template,
+        ModelToolRequest request,
+        RuntimeStepResultStatus stepStatus,
+        string toolStatus,
+        string failureCode,
+        string failureMessage,
+        int iteration,
+        int index,
+        string? childRunId)
+    {
+        var failure = new ExecutionFailure(failureCode, failureMessage);
+        return new RuntimeStepResult(
+            $"{template.StepId}-request-{iteration:000}-{index + 1:000}-{SanitizeStepSegment(SpawnAgentToolId)}-{toolStatus}",
+            RuntimeStepKind.ModuleCapability,
+            stepStatus,
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["runtimeBoundary"] = "runtime.composition.subagent_fanout",
+                ["signals"] = new[] { "tool.results.materialized", $"tool.result.{toolStatus}", "subagent.fanout.item.terminal" },
+                ["toolResults"] = new object?[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["callId"] = request.CallId,
+                        ["toolId"] = SpawnAgentToolId,
+                        ["status"] = toolStatus,
+                        ["output"] = new Dictionary<string, object?>
+                        {
+                            ["resultText"] = null,
+                            ["childRunId"] = childRunId,
+                            ["childThreadId"] = childRunId is null ? null : $"thread-{childRunId}",
+                            ["replaySummaryRef"] = null,
+                            ["diagnosticsRefs"] = Array.Empty<string>(),
+                        },
+                        ["failure"] = new Dictionary<string, object?>
+                        {
+                            ["code"] = failure.Code,
+                            ["message"] = failure.Message,
+                            ["isRetryable"] = failure.IsRetryable,
+                        },
+                    },
+                },
+            }),
+            failure,
+            diagnosticsRef: $"diagnostics://runtime-composition/subagent/{request.CallId}/{failure.Code}",
+            traceRef: $"trace://runtime-composition/subagent/{request.CallId}/{failure.Code}");
+    }
+
+    private static RuntimeStepResult CreateSubAgentFanoutDiagnosticsStepResult(
+        ToolInvocationStep template,
+        ExecutionRuntimeContext context,
+        string fanoutCallId,
+        int maxConcurrency,
+        TimeSpan itemTimeout,
+        IReadOnlyList<SubAgentFanoutJobResult> jobs,
+        SubAgentTreeDiagnostics treeDiagnostics)
+        => new(
+            $"{template.StepId}-{fanoutCallId}-diagnostics",
+            RuntimeStepKind.Diagnostic,
+            RuntimeStepResultStatus.Succeeded,
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["runtimeBoundary"] = "runtime.composition.subagent_fanout",
+                ["signals"] = new[] { "subagent.fanout.diagnostics" },
+                ["fanoutCallId"] = fanoutCallId,
+                ["maxConcurrentAgents"] = maxConcurrency,
+                ["itemTimeoutMs"] = checked((long)itemTimeout.TotalMilliseconds),
+                ["plannedSubTaskCount"] = jobs.Count,
+                ["rootRunId"] = treeDiagnostics.RootRunId,
+                ["ledgerRef"] = treeDiagnostics.LedgerRef,
+                ["reportText"] = treeDiagnostics.ReportText,
+                ["jobs"] = jobs.Select(static job => new Dictionary<string, object?>
+                {
+                    ["index"] = job.Index,
+                    ["callId"] = job.CallId,
+                    ["childRunId"] = job.ChildRunId,
+                    ["status"] = job.Status,
+                    ["failureCode"] = job.FailureCode,
+                    ["allocatedBudget"] = job.AllocatedBudget is null ? null : CreateBudgetPlainObject(job.AllocatedBudget),
+                    ["startedAt"] = job.StartedAt.ToString("O"),
+                    ["completedAt"] = job.CompletedAt.ToString("O"),
+                }).ToArray(),
+                ["subAgentTreeDiagnostics"] = CreateSubAgentTreeDiagnosticsPlainObject(treeDiagnostics),
+            }),
+            diagnosticsRef: $"diagnostics://runtime-composition/subagent/fanout/{fanoutCallId}",
+            traceRef: $"trace://runtime-composition/subagent/fanout/{fanoutCallId}");
+
+    private static SubAgentFanInSummary CreateSubAgentFanInSummary(
+        string fanoutCallId,
+        IReadOnlyList<ModelToolRequest> requests,
+        IReadOnlyList<SubAgentFanoutJobResult> jobs)
+    {
+        var results = jobs
+            .Select((job, index) => CreateSubAgentRunResultFromJob(requests[index], job))
+            .ToArray();
+        var conflicts = DetectSubAgentFanInConflicts(fanoutCallId, jobs, results);
+        var evidenceRefs = requests
+            .SelectMany(static request => ResolveSubAgentEvidenceRefs(request.Input))
+            .Concat(jobs.SelectMany(static job => ReadSubAgentToolOutputStringArray(job.StepResult, "evidenceRefs")))
+            .Concat(conflicts.SelectMany(static conflict => conflict.EvidenceRefs))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var diagnosticsRefs = results
+            .SelectMany(static result => result.DiagnosticsRefs)
+            .Append($"diagnostics://runtime-composition/subagent/fanin/{fanoutCallId}")
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var status = ResolveFanInStatus(results);
+        var summaryText = CreateSubAgentFanInSummaryText(fanoutCallId, status, results, conflicts);
+        return new SubAgentFanInSummary(
+            fanoutCallId,
+            status,
+            results,
+            conflicts,
+            evidenceRefs,
+            diagnosticsRefs,
+            summaryText,
+            new MetadataBag(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+            {
+                ["conflictDetection"] = StructuredValue.FromString("deterministic"),
+                ["modelJudgeReserved"] = StructuredValue.FromBoolean(true),
             }));
+    }
+
+    private static SubAgentRunResult CreateSubAgentRunResultFromJob(ModelToolRequest request, SubAgentFanoutJobResult job)
+    {
+        var toolResult = TryGetToolResultItem(job.StepResult, request.CallId);
+        var output = toolResult is not null && toolResult.TryGetProperty("output", out var outputValue) && outputValue is not null
+            ? outputValue
+            : StructuredValue.FromPlainObject(new Dictionary<string, object?>());
+        var failureValue = toolResult is not null && toolResult.TryGetProperty("failure", out var rawFailure) && rawFailure is not null
+            ? rawFailure
+            : StructuredValue.Null;
+        var statusText = toolResult is not null
+            ? ReadOptionalString(toolResult, "status") ?? job.Status
+            : job.Status;
+        var status = MapSubAgentRunStatus(statusText);
+        var childRunId = ReadOptionalString(output, "childRunId")
+                         ?? job.ChildRunId
+                         ?? $"unmaterialized-{request.CallId}";
+        var childThreadId = ReadOptionalString(output, "childThreadId")
+                            ?? $"thread-{childRunId}";
+        var diagnosticsRefs = ReadStringArray(output, "diagnosticsRefs")
+            .Concat(job.StepResult.DiagnosticsRef is null ? Array.Empty<string>() : [job.StepResult.DiagnosticsRef])
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var artifactRefs = ReadStringArray(output, "artifactRefs")
+            .Concat(ReadStringArray(output, "artifacts"))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var failure = CreateSubAgentFailure(failureValue)
+                      ?? (status == SubAgentRunStatus.Completed
+                          ? null
+                          : new SubAgentFailure(job.FailureCode ?? $"subagent.child_{statusText}", $"sub-agent 子任务以 {statusText} 结束。"));
+        return new SubAgentRunResult(
+            request.CallId,
+            childRunId,
+            childThreadId,
+            status,
+            ReadOptionalString(output, "resultText"),
+            ReadOptionalString(output, "replaySummaryRef"),
+            diagnosticsRefs,
+            failure,
+            artifactRefs);
+    }
+
+    private static SubAgentFailure? CreateSubAgentFailure(StructuredValue value)
+    {
+        if (value.Kind is StructuredValueKind.Null)
+        {
+            return null;
+        }
+
+        var code = ReadOptionalString(value, "code");
+        var message = ReadOptionalString(value, "message");
+        return string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(message)
+            ? null
+            : new SubAgentFailure(code!, message!);
+    }
+
+    private static SubAgentRunStatus MapSubAgentRunStatus(string status)
+        => status switch
+        {
+            "succeeded" => SubAgentRunStatus.Completed,
+            "completed" => SubAgentRunStatus.Completed,
+            "failed" => SubAgentRunStatus.Failed,
+            "timeout" => SubAgentRunStatus.Failed,
+            "blocked" => SubAgentRunStatus.Blocked,
+            "approval-required" => SubAgentRunStatus.Blocked,
+            "cancelled" => SubAgentRunStatus.Cancelled,
+            _ => SubAgentRunStatus.Failed,
+        };
+
+    private static SubAgentFanInStatus ResolveFanInStatus(IReadOnlyList<SubAgentRunResult> results)
+    {
+        if (results.All(static result => result.Status == SubAgentRunStatus.Completed))
+        {
+            return SubAgentFanInStatus.Completed;
+        }
+
+        if (results.All(static result => result.Status == SubAgentRunStatus.Cancelled))
+        {
+            return SubAgentFanInStatus.Cancelled;
+        }
+
+        if (results.All(static result => result.Status == SubAgentRunStatus.Blocked))
+        {
+            return SubAgentFanInStatus.Blocked;
+        }
+
+        return SubAgentFanInStatus.CompletedWithFailures;
+    }
+
+    private static IReadOnlyList<SubAgentConflict> DetectSubAgentFanInConflicts(
+        string fanoutCallId,
+        IReadOnlyList<SubAgentFanoutJobResult> jobs,
+        IReadOnlyList<SubAgentRunResult> results)
+    {
+        var claims = jobs
+            .SelectMany((job, index) => ExtractSubAgentFanInClaims(job.StepResult, results[index].ChildRunId))
+            .ToArray();
+        var conflicts = new List<SubAgentConflict>();
+        var conflictIndex = 1;
+        foreach (var group in claims.GroupBy(static claim => claim.Key, StringComparer.Ordinal).OrderBy(static group => group.Key, StringComparer.Ordinal))
+        {
+            var values = group
+                .Select(static claim => claim.Value)
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (values.Length <= 1)
+            {
+                continue;
+            }
+
+            var childRunIds = group
+                .Select(static claim => claim.ChildRunId)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static value => value, StringComparer.Ordinal)
+                .ToArray();
+            var evidenceRefs = group
+                .SelectMany(static claim => claim.EvidenceRefs)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static value => value, StringComparer.Ordinal)
+                .ToArray();
+            conflicts.Add(new SubAgentConflict(
+                $"conflict-{fanoutCallId}-{conflictIndex:000}",
+                childRunIds,
+                ResolveConflictKind(group.Key),
+                $"子任务对 {group.Key} 给出互斥值：{string.Join(", ", values)}。",
+                evidenceRefs));
+            conflictIndex++;
+        }
+
+        return conflicts;
+    }
+
+    private static IReadOnlyList<SubAgentFanInClaim> ExtractSubAgentFanInClaims(RuntimeStepResult stepResult, string childRunId)
+    {
+        var output = TryGetToolResultItem(stepResult, null) is { } toolResult
+                     && toolResult.TryGetProperty("output", out var outputValue)
+                     && outputValue is not null
+            ? outputValue
+            : StructuredValue.Null;
+        if (output.Kind != StructuredValueKind.Object)
+        {
+            return Array.Empty<SubAgentFanInClaim>();
+        }
+
+        var claims = new List<SubAgentFanInClaim>();
+        if (output.TryGetProperty("claims", out var claimsObject) && claimsObject is { Kind: StructuredValueKind.Object })
+        {
+            foreach (var pair in claimsObject.Properties)
+            {
+                var value = TryReadScalarClaimValue(pair.Value);
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    claims.Add(new SubAgentFanInClaim($"claim:{pair.Key}", value!, childRunId, ReadStringArray(output, "evidenceRefs")));
+                }
+            }
+        }
+
+        if (output.TryGetProperty("checks", out var checksValue) && checksValue is { Kind: StructuredValueKind.Array })
+        {
+            foreach (var check in checksValue.Items.Where(static item => item.Kind == StructuredValueKind.Object))
+            {
+                var key = ReadOptionalString(check, "checkId") ?? ReadOptionalString(check, "key") ?? ReadOptionalString(check, "name");
+                var value = ReadOptionalString(check, "conclusion") ?? ReadOptionalString(check, "value") ?? ReadOptionalString(check, "status");
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                {
+                    claims.Add(new SubAgentFanInClaim($"check:{key}", value!, childRunId, ReadStringArray(check, "evidenceRefs")));
+                }
+            }
+        }
+
+        if (output.TryGetProperty("artifactChanges", out var artifactChangesValue) && artifactChangesValue is { Kind: StructuredValueKind.Array })
+        {
+            foreach (var change in artifactChangesValue.Items.Where(static item => item.Kind == StructuredValueKind.Object))
+            {
+                var artifactRef = ReadOptionalString(change, "artifactRef") ?? ReadOptionalString(change, "ref") ?? ReadOptionalString(change, "path");
+                var value = ReadOptionalString(change, "operation") ?? ReadOptionalString(change, "contentHash") ?? ReadOptionalString(change, "value");
+                if (!string.IsNullOrWhiteSpace(artifactRef) && !string.IsNullOrWhiteSpace(value))
+                {
+                    claims.Add(new SubAgentFanInClaim($"artifact:{artifactRef}", value!, childRunId, ReadStringArray(change, "evidenceRefs")));
+                }
+            }
+        }
+
+        if (output.TryGetProperty("conflictClaims", out var explicitClaimsValue) && explicitClaimsValue is { Kind: StructuredValueKind.Array })
+        {
+            foreach (var claim in explicitClaimsValue.Items.Where(static item => item.Kind == StructuredValueKind.Object))
+            {
+                var key = ReadOptionalString(claim, "key")
+                          ?? ReadOptionalString(claim, "field")
+                          ?? ReadOptionalString(claim, "checkId")
+                          ?? ReadOptionalString(claim, "artifactRef");
+                var value = ReadOptionalString(claim, "value")
+                            ?? ReadOptionalString(claim, "conclusion")
+                            ?? ReadOptionalString(claim, "operation");
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                {
+                    claims.Add(new SubAgentFanInClaim($"claim:{key}", value!, childRunId, ReadStringArray(claim, "evidenceRefs")));
+                }
+            }
+        }
+
+        return claims;
+    }
+
+    private static string? TryReadScalarClaimValue(StructuredValue value)
+        => value.Kind is StructuredValueKind.String or StructuredValueKind.Number or StructuredValueKind.Boolean
+            ? value.GetString()
+            : null;
+
+    private static string ResolveConflictKind(string key)
+    {
+        if (key.StartsWith("artifact:", StringComparison.Ordinal))
+        {
+            return "artifact_conflict";
+        }
+
+        if (key.StartsWith("check:", StringComparison.Ordinal))
+        {
+            return "check_conflict";
+        }
+
+        return "claim_conflict";
+    }
+
+    private static string CreateSubAgentFanInSummaryText(
+        string fanoutCallId,
+        SubAgentFanInStatus status,
+        IReadOnlyList<SubAgentRunResult> results,
+        IReadOnlyList<SubAgentConflict> conflicts)
+    {
+        var completed = results.Count(static result => result.Status == SubAgentRunStatus.Completed);
+        var failed = results.Count(static result => result.Status == SubAgentRunStatus.Failed);
+        var blocked = results.Count(static result => result.Status == SubAgentRunStatus.Blocked);
+        var cancelled = results.Count(static result => result.Status == SubAgentRunStatus.Cancelled);
+        var failureCodes = results
+            .Where(static result => result.Failure is not null)
+            .Select(static result => $"{result.SpawnCallId}:{result.Failure!.Code}")
+            .ToArray();
+        var failureText = failureCodes.Length == 0 ? "none" : string.Join(", ", failureCodes);
+        return $"fan-in {fanoutCallId}: status={status}; total={results.Count}; completed={completed}; failed={failed}; blocked={blocked}; cancelled={cancelled}; conflicts={conflicts.Count}; failures={failureText}.";
+    }
+
+    private static RuntimeStepResult AttachSubAgentFanInSummaryToToolResult(
+        RuntimeStepResult stepResult,
+        SubAgentFanInSummary summary,
+        SubAgentTreeDiagnostics treeDiagnostics)
+    {
+        if (stepResult.Output is null || !stepResult.Output.TryGetProperty("toolResults", out var toolResults) || toolResults is not { Kind: StructuredValueKind.Array })
+        {
+            return stepResult;
+        }
+
+        var summaryValue = StructuredValue.FromPlainObject(CreateSubAgentFanInSummaryPlainObject(summary));
+        var treeDiagnosticsValue = StructuredValue.FromPlainObject(CreateSubAgentTreeDiagnosticsPlainObject(treeDiagnostics));
+        var enrichedToolResults = toolResults.Items
+            .Select(item => AttachSubAgentFanInSummaryToToolResultItem(item, summaryValue, treeDiagnosticsValue))
+            .ToArray();
+        var properties = new Dictionary<string, StructuredValue>(stepResult.Output.Properties, StringComparer.Ordinal)
+        {
+            ["toolResults"] = StructuredValue.FromArray(enrichedToolResults),
+            ["subAgentFanInSummary"] = summaryValue,
+            ["subAgentTreeDiagnostics"] = treeDiagnosticsValue,
+        };
+        return new RuntimeStepResult(
+            stepResult.StepId,
+            stepResult.StepKind,
+            stepResult.Status,
+            StructuredValue.FromObject(properties),
+            stepResult.Failure,
+            stepResult.DiagnosticsRef,
+            stepResult.TraceRef);
+    }
+
+    private static StructuredValue AttachSubAgentFanInSummaryToToolResultItem(
+        StructuredValue item,
+        StructuredValue summaryValue,
+        StructuredValue treeDiagnosticsValue)
+    {
+        if (item.Kind != StructuredValueKind.Object)
+        {
+            return item;
+        }
+
+        var output = item.TryGetProperty("output", out var outputValue) && outputValue is { Kind: StructuredValueKind.Object }
+            ? outputValue
+            : StructuredValue.FromPlainObject(new Dictionary<string, object?>());
+        var outputProperties = new Dictionary<string, StructuredValue>(output.Properties, StringComparer.Ordinal)
+        {
+            ["subAgentFanInSummary"] = summaryValue,
+            ["subAgentTreeDiagnostics"] = treeDiagnosticsValue,
+        };
+        var itemProperties = new Dictionary<string, StructuredValue>(item.Properties, StringComparer.Ordinal)
+        {
+            ["output"] = StructuredValue.FromObject(outputProperties),
+        };
+        return StructuredValue.FromObject(itemProperties);
+    }
+
+    private static RuntimeStepResult CreateSubAgentFanInSummaryStepResult(
+        ToolInvocationStep template,
+        SubAgentFanInSummary summary,
+        SubAgentTreeDiagnostics treeDiagnostics)
+        => new(
+            $"{template.StepId}-{summary.FanoutCallId}-fanin",
+            RuntimeStepKind.Diagnostic,
+            RuntimeStepResultStatus.Succeeded,
+            StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["runtimeBoundary"] = "runtime.composition.subagent_fanin",
+                ["signals"] = new[] { "subagent.fanin.summary" },
+                ["subAgentFanInSummary"] = CreateSubAgentFanInSummaryPlainObject(summary),
+                ["subAgentTreeDiagnostics"] = CreateSubAgentTreeDiagnosticsPlainObject(treeDiagnostics),
+            }),
+            diagnosticsRef: $"diagnostics://runtime-composition/subagent/fanin/{summary.FanoutCallId}",
+            traceRef: $"trace://runtime-composition/subagent/fanin/{summary.FanoutCallId}");
+
+    private static Dictionary<string, object?> CreateSubAgentFanInSummaryPlainObject(SubAgentFanInSummary summary)
+        => new(StringComparer.Ordinal)
+        {
+            ["fanoutCallId"] = summary.FanoutCallId,
+            ["status"] = summary.Status.ToString(),
+            ["summaryText"] = summary.SummaryText,
+            ["results"] = summary.Results.Select(static result => new Dictionary<string, object?>
+            {
+                ["spawnCallId"] = result.SpawnCallId,
+                ["childRunId"] = result.ChildRunId,
+                ["childThreadId"] = result.ChildThreadId,
+                ["status"] = result.Status.ToString(),
+                ["resultText"] = result.ResultText,
+                ["replaySummaryRef"] = result.ReplaySummaryRef,
+                ["diagnosticsRefs"] = result.DiagnosticsRefs,
+                ["artifactRefs"] = result.ArtifactRefs,
+                ["failure"] = result.Failure is null
+                    ? null
+                    : new Dictionary<string, object?>
+                    {
+                        ["code"] = result.Failure.Code,
+                        ["message"] = result.Failure.Message,
+                    },
+            }).ToArray(),
+            ["conflicts"] = summary.Conflicts.Select(static conflict => new Dictionary<string, object?>
+            {
+                ["conflictId"] = conflict.ConflictId,
+                ["childRunIds"] = conflict.ChildRunIds,
+                ["conflictKind"] = conflict.ConflictKind,
+                ["summary"] = conflict.Summary,
+                ["evidenceRefs"] = conflict.EvidenceRefs,
+            }).ToArray(),
+            ["evidenceRefs"] = summary.EvidenceRefs,
+            ["diagnosticsRefs"] = summary.DiagnosticsRefs,
+            ["metadata"] = summary.Metadata.Entries.ToDictionary(
+                static pair => pair.Key,
+                static pair => pair.Value.ToPlainObject(),
+                StringComparer.Ordinal),
+        };
+
+    private static SubAgentTreeDiagnostics CreateSubAgentTreeDiagnostics(
+        string fanoutCallId,
+        SubAgentLineage rootLineage,
+        SubAgentSpawnQuota quota,
+        SubAgentTreeBudget budget,
+        SubAgentFanInSummary summary)
+    {
+        var rootStatus = summary.Status switch
+        {
+            SubAgentFanInStatus.Blocked => SubAgentRunStatus.Blocked,
+            SubAgentFanInStatus.Cancelled => SubAgentRunStatus.Cancelled,
+            _ => SubAgentRunStatus.Completed,
+        };
+        var nodes = new List<SubAgentNodeDiagnostics>
+        {
+            new(
+                rootLineage.CurrentRunId,
+                rootLineage.ParentRunId,
+                rootLineage.Depth,
+                rootLineage.SiblingIndex,
+                rootStatus,
+                replaySummaryRef: null,
+                diagnosticsRefs: summary.DiagnosticsRefs,
+                artifactRefs: summary.Results.SelectMany(static result => result.ArtifactRefs).Distinct(StringComparer.Ordinal).ToArray()),
+        };
+        nodes.AddRange(summary.Results.Select((result, index) => new SubAgentNodeDiagnostics(
+            result.ChildRunId,
+            rootLineage.CurrentRunId,
+            rootLineage.Depth + 1,
+            index,
+            result.Status,
+            result.ReplaySummaryRef,
+            result.DiagnosticsRefs,
+            result.ArtifactRefs,
+            result.Failure)));
+        var edges = summary.Results.Select(result => new SubAgentEdgeDiagnostics(
+            rootLineage.CurrentRunId,
+            result.ChildRunId,
+            result.SpawnCallId,
+            fanoutCallId,
+            result.Status,
+            result.DiagnosticsRefs,
+            result.ArtifactRefs,
+            result.Failure)).ToArray();
+        var replayRefs = summary.Results
+            .Select(static result => result.ReplaySummaryRef)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var auditRefs = summary.DiagnosticsRefs
+            .Concat(summary.Results.SelectMany(static result => result.DiagnosticsRefs))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return new SubAgentTreeDiagnostics(
+            rootLineage.RootRunId,
+            rootLineage.LedgerRef,
+            quota,
+            budget,
+            nodes,
+            edges,
+            replayRefs,
+            auditRefs,
+            CreateSubAgentTreeReportText(summary),
+            new MetadataBag(new Dictionary<string, StructuredValue>(StringComparer.Ordinal)
+            {
+                ["source"] = StructuredValue.FromString("runtime.composition.subagent_fanout"),
+                ["fanoutCallId"] = StructuredValue.FromString(fanoutCallId),
+                ["diagnosticsSchema"] = StructuredValue.FromString("sub_agent.tree_diagnostics.v1"),
+            }));
+    }
+
+    private static string CreateSubAgentTreeReportText(SubAgentFanInSummary summary)
+    {
+        var completed = summary.Results.Count(static result => result.Status == SubAgentRunStatus.Completed);
+        var failed = summary.Results.Count(static result => result.Status == SubAgentRunStatus.Failed);
+        var blocked = summary.Results.Count(static result => result.Status == SubAgentRunStatus.Blocked);
+        var cancelled = summary.Results.Count(static result => result.Status == SubAgentRunStatus.Cancelled);
+        var artifactCount = summary.Results
+            .SelectMany(static result => result.ArtifactRefs)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        var failureCodes = summary.Results
+            .Where(static result => result.Failure is not null)
+            .Select(static result => $"{result.ChildRunId}:{result.Failure!.Code}")
+            .ToArray();
+        var failures = failureCodes.Length == 0 ? "none" : string.Join(", ", failureCodes);
+        return $"sub-agent tree {summary.FanoutCallId}: nodes={summary.Results.Count + 1}; edges={summary.Results.Count}; completed={completed}; failed={failed}; blocked={blocked}; cancelled={cancelled}; conflicts={summary.Conflicts.Count}; artifacts={artifactCount}; failures={failures}.";
+    }
+
+    private static Dictionary<string, object?> CreateSubAgentTreeDiagnosticsPlainObject(SubAgentTreeDiagnostics diagnostics)
+        => new(StringComparer.Ordinal)
+        {
+            ["rootRunId"] = diagnostics.RootRunId,
+            ["ledgerRef"] = diagnostics.LedgerRef,
+            ["quota"] = CreateQuotaPlainObject(diagnostics.Quota),
+            ["budget"] = CreateTreeBudgetPlainObject(diagnostics.Budget),
+            ["reportText"] = diagnostics.ReportText,
+            ["nodes"] = diagnostics.Nodes.Select(static node => new Dictionary<string, object?>
+            {
+                ["runId"] = node.RunId,
+                ["parentRunId"] = node.ParentRunId,
+                ["depth"] = node.Depth,
+                ["siblingIndex"] = node.SiblingIndex,
+                ["status"] = node.Status.ToString(),
+                ["replaySummaryRef"] = node.ReplaySummaryRef,
+                ["diagnosticsRefs"] = node.DiagnosticsRefs,
+                ["artifactRefs"] = node.ArtifactRefs,
+                ["failure"] = node.Failure is null
+                    ? null
+                    : new Dictionary<string, object?>
+                    {
+                        ["code"] = node.Failure.Code,
+                        ["message"] = node.Failure.Message,
+                    },
+            }).ToArray(),
+            ["edges"] = diagnostics.Edges.Select(static edge => new Dictionary<string, object?>
+            {
+                ["parentRunId"] = edge.ParentRunId,
+                ["childRunId"] = edge.ChildRunId,
+                ["spawnCallId"] = edge.SpawnCallId,
+                ["fanoutCallId"] = edge.FanoutCallId,
+                ["status"] = edge.Status.ToString(),
+                ["diagnosticsRefs"] = edge.DiagnosticsRefs,
+                ["artifactRefs"] = edge.ArtifactRefs,
+                ["failure"] = edge.Failure is null
+                    ? null
+                    : new Dictionary<string, object?>
+                    {
+                        ["code"] = edge.Failure.Code,
+                        ["message"] = edge.Failure.Message,
+                    },
+            }).ToArray(),
+            ["replayRefs"] = diagnostics.ReplayRefs,
+            ["auditRefs"] = diagnostics.AuditRefs,
+            ["metadata"] = diagnostics.Metadata.Entries.ToDictionary(
+                static pair => pair.Key,
+                static pair => pair.Value.ToPlainObject(),
+                StringComparer.Ordinal),
+        };
+
+    private static Dictionary<string, object?> CreateTreeBudgetPlainObject(SubAgentTreeBudget budget)
+        => new(StringComparer.Ordinal)
+        {
+            ["rootBudget"] = CreateBudgetPlainObject(budget.RootBudget),
+            ["maxSubTasks"] = budget.MaxSubTasks,
+            ["maxDepth"] = budget.MaxDepth,
+            ["maxConcurrentAgents"] = budget.MaxConcurrentAgents,
+            ["maxBudgetPerAgent"] = budget.MaxBudgetPerAgent is null ? null : CreateBudgetPlainObject(budget.MaxBudgetPerAgent),
+            ["maxCost"] = budget.MaxCost,
+            ["metadata"] = budget.Metadata.Entries.ToDictionary(
+                static pair => pair.Key,
+                static pair => pair.Value.ToPlainObject(),
+                StringComparer.Ordinal),
+        };
+
+    private static StructuredValue? TryGetToolResultItem(RuntimeStepResult stepResult, string? callId)
+    {
+        if (stepResult.Output is null
+            || !stepResult.Output.TryGetProperty("toolResults", out var toolResults)
+            || toolResults is not { Kind: StructuredValueKind.Array })
+        {
+            return null;
+        }
+
+        return toolResults.Items.FirstOrDefault(item =>
+            item.Kind == StructuredValueKind.Object
+            && (callId is null || string.Equals(ReadOptionalString(item, "callId"), callId, StringComparison.Ordinal)));
+    }
+
+    private static IReadOnlyList<string> ReadSubAgentToolOutputStringArray(RuntimeStepResult stepResult, string propertyName)
+    {
+        var output = TryGetToolResultItem(stepResult, null) is { } toolResult
+                     && toolResult.TryGetProperty("output", out var outputValue)
+                     && outputValue is not null
+            ? outputValue
+            : StructuredValue.Null;
+        return output.Kind == StructuredValueKind.Object
+            ? ReadStringArray(output, propertyName)
+            : Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<string> ReadStringArray(StructuredValue value, string propertyName)
+    {
+        if (!value.TryGetProperty(propertyName, out var propertyValue)
+            || propertyValue is not { Kind: StructuredValueKind.Array })
+        {
+            return Array.Empty<string>();
+        }
+
+        return propertyValue.Items
+            .Select(static item => item.Kind is StructuredValueKind.String or StructuredValueKind.Number ? item.GetString() : null)
+            .Where(static text => !string.IsNullOrWhiteSpace(text))
+            .Select(static text => text!)
+            .ToArray();
     }
 
     private static DiagnosticStep CreateToolExecDiagnosticStep(
@@ -1466,6 +2512,35 @@ public sealed class AdaptiveRuntimeExecutionLoop : IKernelRuntimeExecutionLoop
             AddSignals(nestedSignals, signals);
         }
     }
+
+    private sealed record SubAgentFanoutRuntimeExecution(
+        ExecutionRunResult? RuntimeResult,
+        string? FailureCode,
+        string? FailureMessage)
+    {
+        public static SubAgentFanoutRuntimeExecution Succeeded(ExecutionRunResult result)
+            => new(result, null, null);
+
+        public static SubAgentFanoutRuntimeExecution Failed(string failureCode, string failureMessage)
+            => new(null, failureCode, failureMessage);
+    }
+
+    private sealed record SubAgentFanoutJobResult(
+        int Index,
+        string CallId,
+        string? ChildRunId,
+        KernelBudget? AllocatedBudget,
+        string Status,
+        string? FailureCode,
+        RuntimeStepResult StepResult,
+        DateTimeOffset StartedAt,
+        DateTimeOffset CompletedAt);
+
+    private sealed record SubAgentFanInClaim(
+        string Key,
+        string Value,
+        string ChildRunId,
+        IReadOnlyList<string> EvidenceRefs);
 
     private sealed record ModelToolRequest(
         string CallId,

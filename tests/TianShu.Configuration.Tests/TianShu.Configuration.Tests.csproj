@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\Hosting\TianShu.AppHost.Configuration\TianShu.AppHost.Configuration.csproj" />
     <ProjectReference Include="..\..\src\Core\TianShu.Configuration\TianShu.Configuration.csproj" />
     <ProjectReference Include="..\..\src\Contracts\TianShu.Contracts.Configuration\TianShu.Contracts.Configuration.csproj" />
+    <ProjectReference Include="..\..\src\Contracts\TianShu.Contracts.Modules\TianShu.Contracts.Modules.csproj" />
   </ItemGroup>
 
 </Project>

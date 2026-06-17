@@ -49,6 +49,12 @@ public sealed class ExecutionRuntimeSubAgentModuleBridge : IExecutionRuntimeSubA
             return CreateBlockedResult(step, context, quotaFailure);
         }
 
+        var budgetFailure = ValidateRequestedBudgetWithinStepBudget(request.RequestedBudget, step.Budget);
+        if (budgetFailure is not null)
+        {
+            return CreateBlockedResult(step, context, budgetFailure);
+        }
+
         SubAgentRunResult result;
         try
         {
@@ -126,7 +132,39 @@ public sealed class ExecutionRuntimeSubAgentModuleBridge : IExecutionRuntimeSubA
             context.KernelRunId.Value,
             context.Governance,
             context.WorkingDirectory,
-            step.Metadata);
+            CreateInvocationMetadata(step, context));
+
+    private static MetadataBag CreateInvocationMetadata(ModuleCapabilityStep step, ExecutionRuntimeContext context)
+    {
+        var entries = new Dictionary<string, StructuredValue>(step.Metadata.Entries, StringComparer.Ordinal)
+        {
+            ["subAgent.parentGovernance"] = StructuredValue.FromPlainObject(CreateGovernancePlainObject(context.Governance)),
+            ["subAgent.parentTracePolicy"] = StructuredValue.FromPlainObject(CreateTracePolicyPlainObject(step.TracePolicy)),
+            ["subAgent.parentRuntimeStepBudget"] = StructuredValue.FromPlainObject(CreateBudgetPlainObject(step.Budget)),
+            ["subAgent.parentPermission"] = StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["scopes"] = step.Permission.Scopes,
+                ["grants"] = step.Permission.Grants,
+                ["requiresHumanGate"] = step.Permission.RequiresHumanGate,
+                ["reason"] = step.Permission.Reason,
+            }),
+            ["subAgent.parentSideEffect"] = StructuredValue.FromPlainObject(new Dictionary<string, object?>
+            {
+                ["level"] = step.SideEffect.Level.ToString(),
+                ["affectedResources"] = step.SideEffect.AffectedResources,
+                ["reversible"] = step.SideEffect.Reversible,
+                ["requiresAudit"] = step.SideEffect.RequiresAudit,
+            }),
+            ["subAgent.parentExecutionId"] = StructuredValue.FromString(context.ExecutionId.Value),
+            ["subAgent.parentKernelRunId"] = StructuredValue.FromString(context.KernelRunId.Value),
+        };
+        if (!string.IsNullOrWhiteSpace(context.WorkingDirectory))
+        {
+            entries["subAgent.parentWorkingDirectory"] = StructuredValue.FromString(context.WorkingDirectory!);
+        }
+
+        return new MetadataBag(entries);
+    }
 
     private static RuntimeStepResult CreateToolResult(
         ModuleCapabilityStep step,
@@ -237,6 +275,47 @@ public sealed class ExecutionRuntimeSubAgentModuleBridge : IExecutionRuntimeSubA
 
     private static string? ResolvePlanId(ExecutionRuntimeContext context)
         => context.Metadata.TryGetValue("planId", out var planId) ? planId.GetString() : null;
+
+    private static ExecutionFailure? ValidateRequestedBudgetWithinStepBudget(KernelBudget requested, KernelBudget stepBudget)
+        => requested.TokenBudget > stepBudget.TokenBudget
+           || requested.TimeBudgetMs > stepBudget.TimeBudgetMs
+           || requested.CostBudget > stepBudget.CostBudget
+           || requested.RetryBudget > stepBudget.RetryBudget
+           || requested.ToolCallBudget > stepBudget.ToolCallBudget
+            ? new ExecutionFailure("subagent_requested_budget_exceeds_step_budget", "Sub-Agent requestedBudget 超出父 RuntimeStep 预算。")
+            : null;
+
+    private static Dictionary<string, object?> CreateGovernancePlainObject(GovernanceEnvelope governance)
+        => new(StringComparer.Ordinal)
+        {
+            ["envelopeId"] = governance.EnvelopeId,
+            ["policyIds"] = governance.PolicyIds,
+            ["allowedToolIds"] = governance.AllowedToolIds,
+            ["allowedModuleIds"] = governance.AllowedModuleIds,
+            ["maxSideEffectLevel"] = governance.MaxSideEffectLevel.ToString(),
+            ["requiresHumanGate"] = governance.RequiresHumanGate,
+            ["approvalIds"] = governance.ApprovalIds.Select(static approval => approval.Value).ToArray(),
+            ["auditRecordIds"] = governance.AuditRecordIds.Select(static audit => audit.Value).ToArray(),
+        };
+
+    private static Dictionary<string, object?> CreateTracePolicyPlainObject(TracePolicy tracePolicy)
+        => new(StringComparer.Ordinal)
+        {
+            ["enabled"] = tracePolicy.Enabled,
+            ["requireDiagnosticsRef"] = tracePolicy.RequireDiagnosticsRef,
+            ["requireRuntimeTraceRef"] = tracePolicy.RequireRuntimeTraceRef,
+            ["requiredEventKinds"] = tracePolicy.RequiredEventKinds,
+        };
+
+    private static Dictionary<string, object?> CreateBudgetPlainObject(KernelBudget budget)
+        => new(StringComparer.Ordinal)
+        {
+            ["tokenBudget"] = budget.TokenBudget,
+            ["timeBudgetMs"] = budget.TimeBudgetMs,
+            ["costBudget"] = budget.CostBudget,
+            ["retryBudget"] = budget.RetryBudget,
+            ["toolCallBudget"] = budget.ToolCallBudget,
+        };
 
     private static bool TryReadSpawnRequest(
         StructuredValue value,

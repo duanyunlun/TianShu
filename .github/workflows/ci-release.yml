@@ -45,10 +45,70 @@ jobs:
       - name: Test installer preservation guard
         run: dotnet test tests/TianShu.Execution.Integration.Tests/TianShu.Execution.Integration.Tests.csproj --configuration Release --nologo --logger "console;verbosity=minimal" --filter "FullyQualifiedName~InstallScriptConfigurationPreservationTests" -m:1
 
+      - name: Test v0.6 module release gate
+        shell: pwsh
+        run: ./tools/Test-TianShuV06ModuleReleaseGate.ps1 -Configuration Release
+
+      - name: Test v0.7 capability release gate
+        shell: pwsh
+        run: ./tools/Test-TianShuV07CapabilityReleaseGate.ps1 -Configuration Release
+
+      - name: Test v0.8 remote continuity release gate
+        shell: pwsh
+        run: ./tools/Test-TianShuV08RemoteContinuityReleaseGate.ps1 -Configuration Release
+
+      - name: Test v0.9 multi-agent release gate
+        shell: pwsh
+        run: ./tools/Test-TianShuV09MultiAgentReleaseGate.ps1 -Configuration Release
+
+      - name: Test v1.0 production documentation gate
+        shell: pwsh
+        run: ./tools/Test-TianShuV10DocumentationReleaseGate.ps1 -Configuration Release
+
+      - name: Test public release safety scan
+        shell: pwsh
+        run: ./tools/Test-TianShuPublicReleaseSafetyScan.ps1 -Configuration Release
+
+      - name: Test release acceptance gate
+        shell: pwsh
+        run: ./tools/Test-TianShuReleaseAcceptanceGate.ps1 -Configuration Release
+
+      - name: Test P31.5 CI matrix regression
+        run: dotnet test tests/TianShu.Execution.Integration.Tests/TianShu.Execution.Integration.Tests.csproj --configuration Release --nologo --logger "console;verbosity=minimal" --filter "FullyQualifiedName~P31_5_CrossPlatformCiMatrix" -m:1
+
+  cross-platform-source-smoke:
+    name: Source CLI smoke (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    needs: build-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-26
+            rid: osx-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore, build, init, and doctor from source
+        shell: pwsh
+        run: ./tools/Test-TianShuCrossPlatformCliSourceSmoke.ps1 -Configuration Release
+
   package-cli:
     name: Package CLI
     runs-on: windows-latest
-    needs: build-test
+    needs:
+      - build-test
+      - cross-platform-source-smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,7 +129,7 @@ jobs:
       - name: Upload release packages artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tianshu-cli-release-packages
+          name: tianshu-portable-release-packages
           path: artifacts/release/packages/*
           if-no-files-found: error
 
@@ -99,7 +159,7 @@ jobs:
       - name: Download release packages
         uses: actions/download-artifact@v4
         with:
-          name: tianshu-cli-release-packages
+          name: tianshu-portable-release-packages
           path: artifacts/release/packages
 
       - name: Smoke release package
@@ -122,7 +182,7 @@ jobs:
       - name: Download release packages
         uses: actions/download-artifact@v4
         with:
-          name: tianshu-cli-release-packages
+          name: tianshu-portable-release-packages
           path: artifacts/release/packages
 
       - name: Create GitHub Release

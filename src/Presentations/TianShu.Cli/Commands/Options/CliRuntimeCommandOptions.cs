@@ -312,6 +312,12 @@ internal sealed class FollowUpCliCommandOptions : CliRuntimeCommandOptions
 
     public bool ApproveAll { get; set; }
 
+    public bool EnableShell { get; set; }
+
+    public bool EnableMcp { get; set; }
+
+    public bool EnableMemory { get; set; }
+
     public ControlPlaneApprovalDecision ApprovalDecision { get; set; } = ControlPlaneApprovalDecision.Approve;
 
     public string? PermissionsJsonPath { get; set; }

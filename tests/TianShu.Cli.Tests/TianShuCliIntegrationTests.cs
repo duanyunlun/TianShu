@@ -310,6 +310,41 @@ public sealed class TianShuCliIntegrationTests
     }
 
     [Fact]
+    public void ResolveForTesting_WhenPortablePackageContainsAppHost_UsesPackageRootBeforeUserLevelProbe()
+    {
+        var resolverType = ReflectionTestHelper.GetRequiredType(CliAssembly, "TianShu.Cli.CliAppHostLaunchResolver");
+        using var tempDir = new TestTempDirectory();
+        var workingDirectory = Path.Combine(tempDir.Path, "workspace");
+        var packageRoot = Path.Combine(tempDir.Path, "portable");
+        var binRoot = Path.Combine(packageRoot, "bin");
+        var userProfileDirectory = Path.Combine(tempDir.Path, "profile");
+        Directory.CreateDirectory(workingDirectory);
+        Directory.CreateDirectory(binRoot);
+
+        var portableAppHostDirectory = Path.Combine(packageRoot, "runtime", "apphost");
+        Directory.CreateDirectory(portableAppHostDirectory);
+        var portableExecutablePath = Path.Combine(portableAppHostDirectory, "TianShu.AppHost.exe");
+        File.WriteAllText(portableExecutablePath, "portable", new UTF8Encoding(false));
+
+        var userAppHostDirectory = Path.Combine(userProfileDirectory, ".tianshu", "runtime", "apphost");
+        Directory.CreateDirectory(userAppHostDirectory);
+        var userExecutablePath = Path.Combine(userAppHostDirectory, "TianShu.AppHost.exe");
+        File.WriteAllText(userExecutablePath, "user", new UTF8Encoding(false));
+
+        var resolution = ReflectionTestHelper.InvokeStaticMethod(
+            resolverType,
+            "ResolveForTesting",
+            null,
+            workingDirectory,
+            binRoot,
+            userProfileDirectory);
+
+        Assert.NotNull(resolution);
+        Assert.Equal(portableExecutablePath, ReflectionTestHelper.GetProperty(resolution!, "AppHostExecutablePath"));
+        Assert.Null(ReflectionTestHelper.GetProperty(resolution, "AppHostProjectPath"));
+    }
+
+    [Fact]
     public void Prepare_AppliesResolvedConfigToRuntimeOptions()
     {
         var parserType = ReflectionTestHelper.GetRequiredType(CliAssembly, "TianShu.Cli.CliCommandParser");

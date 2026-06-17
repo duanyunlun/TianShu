@@ -148,9 +148,12 @@ public sealed class ExecutionRuntimeToolBridge : IExecutionRuntimeToolBridge
         ToolInvocationResult result,
         string status,
         ExecutionFailure? failure)
-        => StructuredValue.FromPlainObject(new Dictionary<string, object?>
+    {
+        var toolRuntimeBoundary = ResolveToolRuntimeBoundary(result.ToolKey);
+        return StructuredValue.FromPlainObject(new Dictionary<string, object?>
         {
             ["runtimeBoundary"] = "execution.runtime.tool_bridge",
+            ["toolRuntimeBoundary"] = toolRuntimeBoundary,
             ["runtimePlanId"] = ResolvePlanId(step, context),
             ["stepId"] = step.StepId,
             ["stepKind"] = step.StepKind.ToString(),
@@ -169,6 +172,7 @@ public sealed class ExecutionRuntimeToolBridge : IExecutionRuntimeToolBridge
                 {
                     ["callId"] = result.CallId.Value,
                     ["toolId"] = result.ToolKey,
+                    ["runtimeBoundary"] = toolRuntimeBoundary,
                     ["status"] = status,
                     ["output"] = CreateToolOutput(result),
                     ["failure"] = failure is null ? null : CreateFailureOutput(failure),
@@ -176,6 +180,7 @@ public sealed class ExecutionRuntimeToolBridge : IExecutionRuntimeToolBridge
                 },
             },
         });
+    }
 
     private static StructuredValue CreateToolResultOutput(
         ToolInvocationStep step,
@@ -284,6 +289,7 @@ public sealed class ExecutionRuntimeToolBridge : IExecutionRuntimeToolBridge
         if (failureCode.Contains("blocked", StringComparison.OrdinalIgnoreCase)
             || failureCode.Contains("not_allowed", StringComparison.OrdinalIgnoreCase)
             || failureCode.Contains("denied", StringComparison.OrdinalIgnoreCase)
+            || failureCode.Contains("rejected", StringComparison.OrdinalIgnoreCase)
             || failureCode.Contains("sandbox", StringComparison.OrdinalIgnoreCase))
         {
             return "blocked";
@@ -351,5 +357,22 @@ public sealed class ExecutionRuntimeToolBridge : IExecutionRuntimeToolBridge
         }
 
         return "runtime-plan-unknown";
+    }
+
+    private static string ResolveToolRuntimeBoundary(string toolId)
+    {
+        if (toolId.StartsWith("mcp.", StringComparison.Ordinal))
+        {
+            return "tool.mcp_tool";
+        }
+
+        if (string.Equals(toolId, "list_mcp_resources", StringComparison.Ordinal)
+            || string.Equals(toolId, "list_mcp_resource_templates", StringComparison.Ordinal)
+            || string.Equals(toolId, "read_mcp_resource", StringComparison.Ordinal))
+        {
+            return "tool.mcp_resource";
+        }
+
+        return "execution.runtime.tool_bridge";
     }
 }

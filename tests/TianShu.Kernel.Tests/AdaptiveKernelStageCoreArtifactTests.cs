@@ -100,18 +100,54 @@ public sealed class AdaptiveKernelStageCoreArtifactTests
         Assert.Contains(result.Issues, static issue => issue.Code == "kernel.graph.human_gate_not_granted");
     }
 
-    private static C0StageGraphCandidate LoadCandidateFixture()
+    [Fact]
+    public async Task P31_2_OldStageGraphFixtureWithAdditiveFields_ShouldMapAndValidate()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "adaptive-kernel", "c0-calibrated-stagegraph.json");
-        var json = File.ReadAllText(path);
+        var json = File.ReadAllText(FixturePath())
+            .Replace(
+                "\"version\": \"1\"",
+                "\"version\": \"1.1.0\", \"futureAdditiveMetadata\": { \"ignoredBy\": \"v1-loader\" }",
+                StringComparison.Ordinal);
+        var candidate = DeserializeCandidate(json, "p31.2-old-stagegraph-additive");
+        var graph = CreateStageGraph(candidate);
+        var intent = CreateIntentFor(graph);
+
+        var validation = await new KernelValidator().ValidateGraphAsync(graph, new KernelValidationContext(intent, graph: graph));
+
+        Assert.True(validation.IsApproved, string.Join(Environment.NewLine, validation.Issues.Select(static issue => $"{issue.Code}: {issue.Message}")));
+        Assert.Equal("1.1.0", graph.Version);
+        Assert.Equal(new StageGraphId("graph-c0-001"), graph.GraphId);
+    }
+
+    [Fact]
+    public void P31_2_UnknownMajorStageGraphFixture_ShouldFailClosedBeforeMapping()
+    {
+        var json = File.ReadAllText(FixturePath())
+            .Replace("\"version\": \"1\"", "\"version\": \"2.0.0\"", StringComparison.Ordinal);
+        var candidate = DeserializeCandidate(json, "p31.2-future-stagegraph");
+
+        var exception = Assert.Throws<InvalidDataException>(() => CreateStageGraph(candidate));
+
+        Assert.Contains("stage_graph_fixture.version_incompatible", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static C0StageGraphCandidate LoadCandidateFixture()
+        => DeserializeCandidate(File.ReadAllText(FixturePath()), FixturePath());
+
+    private static string FixturePath()
+        => Path.Combine(AppContext.BaseDirectory, "Fixtures", "adaptive-kernel", "c0-calibrated-stagegraph.json");
+
+    private static C0StageGraphCandidate DeserializeCandidate(string json, string source)
+    {
         return JsonSerializer.Deserialize<C0StageGraphCandidate>(json, JsonOptions)
-            ?? throw new InvalidDataException($"Cannot deserialize C0 StageGraph fixture: {path}");
+            ?? throw new InvalidDataException($"Cannot deserialize C0 StageGraph fixture: {source}");
     }
 
     private static StageGraph CreateStageGraph(C0StageGraphCandidate candidate)
     {
         var graphId = Required(candidate.GraphId, nameof(candidate.GraphId));
         var version = Required(candidate.Version, nameof(candidate.Version));
+        AssertSupportedFixtureVersion(version);
         var intentKind = ParseEnum<CoreIntentKind>(candidate.IntentKind, nameof(candidate.IntentKind));
         var entryStageId = new StageId(Required(candidate.EntryStageId, nameof(candidate.EntryStageId)));
         var policies = candidate.Policies ?? throw new InvalidDataException("C0 candidate missing policies.");
@@ -211,6 +247,25 @@ public sealed class AdaptiveKernelStageCoreArtifactTests
         }
 
         return parsed;
+    }
+
+    private static void AssertSupportedFixtureVersion(string version)
+    {
+        if (!Version.TryParse(version, out var parsed)
+            && int.TryParse(version, out var majorOnly))
+        {
+            parsed = new Version(majorOnly, 0);
+        }
+
+        if (parsed is null)
+        {
+            throw new InvalidDataException($"stage_graph_fixture.version_invalid: {version}");
+        }
+
+        if (parsed.Major != 1)
+        {
+            throw new InvalidDataException($"stage_graph_fixture.version_incompatible: {version}");
+        }
     }
 
     private static string Required(string? value, string fieldName)

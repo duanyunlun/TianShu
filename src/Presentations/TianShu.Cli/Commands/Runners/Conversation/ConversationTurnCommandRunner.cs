@@ -5,6 +5,7 @@ using TianShu.ControlPlane;
 using TianShu.Execution.Runtime;
 using TianShu.Execution.Runtime.Events;
 using TianShu.Contracts.Conversations;
+using TianShu.Contracts.Governance;
 using TianShu.RuntimeComposition;
 
 namespace TianShu.Cli;
@@ -425,6 +426,21 @@ internal sealed class ConversationTurnCommandRunner
                 options.ProfileName,
                 options.ConfigOverrides,
                 options.WorkingDirectory);
+            var runtimeWriteCheck = CliRuntimeWriteGuard.CheckKernelRuntimeWorkspace(
+                resolvedConfig.UserConfigPath,
+                options.WorkingDirectory);
+            if (!runtimeWriteCheck.Available)
+            {
+                return WriteKernelRuntimeFollowUpResult(
+                    options,
+                    operation: "follow-up",
+                    status: "failed",
+                    threadId: options.ResumeThreadId,
+                    turnId: options.TurnId,
+                    failureCode: runtimeWriteCheck.FailureCode,
+                    failureMessage: runtimeWriteCheck.FailureMessage,
+                    payload: null);
+            }
 
             if (!string.IsNullOrWhiteSpace(options.CheckpointRef))
             {
@@ -493,6 +509,8 @@ internal sealed class ConversationTurnCommandRunner
 
             if (options.Mode == ControlPlaneFollowUpMode.Steer)
             {
+                var enableWorkspaceWrite = options.ApproveAll && options.ApprovalDecision == ControlPlaneApprovalDecision.Approve;
+                var enableShell = options.EnableShell && enableWorkspaceWrite;
                 var steer = await KernelRuntimeTurnLoopBridge.RunSteerAsync(
                         new KernelRuntimeSteerRequest(
                             options.ResumeThreadId,
@@ -501,7 +519,14 @@ internal sealed class ConversationTurnCommandRunner
                             [options.Message],
                             options.WorkingDirectory,
                             options.TurnTimeoutSeconds,
-                            resolvedConfig),
+                            resolvedConfig,
+                            EnableWorkspaceWrite: enableWorkspaceWrite,
+                            WorkspaceWriteApprovalId: enableWorkspaceWrite
+                                ? new ApprovalId($"approval-cli-kernel-followup-workspace-write-{Guid.NewGuid():N}")
+                                : null,
+                            EnableShell: enableShell,
+                            EnableMcp: options.EnableMcp,
+                            EnableMemory: options.EnableMemory),
                         cancellationToken)
                     .ConfigureAwait(false);
 

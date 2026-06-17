@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TianShu.Contracts.Kernel;
 using TianShu.Contracts.Primitives;
 using TianShu.Contracts.Tools;
 using TianShu.Tools.McpResources;
@@ -54,6 +55,38 @@ public sealed class KernelMcpResourceToolHandlerTests
 
         Assert.NotNull(result.Failure);
         Assert.Equal("cursor can only be used when a server is specified", result.Failure.Message);
+    }
+
+    [Fact]
+    public async Task ListMcpResourcesToolHandler_ShouldFailClosedWhenResourceServicesAreUnavailable()
+    {
+        var handler = CreateHandler("list_mcp_resources");
+        using var args = JsonDocument.Parse("""{ "server": "docs" }""");
+
+        var result = await handler.InvokeAsync(
+            CreateRequest("list_mcp_resources", args.RootElement),
+            CreateContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("mcp_resource_not_opened", result.Failure.Code);
+    }
+
+    [Fact]
+    public async Task ListMcpResourcesToolHandler_ShouldDegradeWhenServerListFails()
+    {
+        var handler = CreateHandler("list_mcp_resources");
+        using var args = JsonDocument.Parse("""{ "server": "docs" }""");
+
+        var result = await handler.InvokeAsync(
+            CreateRequest("list_mcp_resources", args.RootElement),
+            CreateContext(new TestMcpResourceServices(
+                ListResources: (_, _, _) => throw new InvalidOperationException("server unavailable"))),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("mcp_resource_degraded", result.Failure.Code);
+        Assert.Equal("resources/list failed: server unavailable", result.Failure.Message);
     }
 
     [Fact]
@@ -127,6 +160,23 @@ public sealed class KernelMcpResourceToolHandlerTests
     }
 
     [Fact]
+    public async Task ReadMcpResourceToolHandler_ShouldProjectReadFailure()
+    {
+        var handler = CreateHandler("read_mcp_resource");
+        using var args = JsonDocument.Parse("""{ "server": "docs", "uri": "file://docs/missing.md" }""");
+
+        var result = await handler.InvokeAsync(
+            CreateRequest("read_mcp_resource", args.RootElement),
+            CreateContext(new TestMcpResourceServices(
+                ReadResource: (_, _, _) => throw new InvalidOperationException("not found"))),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("mcp_resource_read_failed", result.Failure.Code);
+        Assert.Equal("resources/read failed: not found", result.Failure.Message);
+    }
+
+    [Fact]
     public async Task ReadMcpResourceToolHandler_ShouldRequireServerAndUri()
     {
         var handler = CreateHandler("read_mcp_resource");
@@ -142,18 +192,62 @@ public sealed class KernelMcpResourceToolHandlerTests
         Assert.Equal("uri is required", result.Failure.Message);
     }
 
+    [Fact]
+    public void McpResourceToolProvider_ShouldIgnoreDynamicMcpToolWithInvalidInputSchema()
+    {
+        using var schema = JsonDocument.Parse("""{ "type": "string" }""");
+        var provider = new McpResourceToolProvider([
+            CreateMcpToolDescriptor("mcp.docs.invalid", schema.RootElement),
+        ]);
+
+        var descriptors = provider.DescribeTools(new TianShuToolRegistrationContext());
+
+        Assert.DoesNotContain(descriptors, static descriptor => descriptor.ToolId == "mcp.docs.invalid");
+        Assert.Throws<InvalidOperationException>(() => provider.CreateHandler("mcp.docs.invalid", new TianShuToolActivationContext()));
+    }
+
+    [Fact]
+    public void McpResourceToolProvider_ShouldProjectDynamicMcpToolSchemaAndGovernance()
+    {
+        using var schema = JsonDocument.Parse("""{ "type": "object", "properties": { "query": { "type": "string" } } }""");
+        var provider = new McpResourceToolProvider([
+            CreateMcpToolDescriptor("mcp.docs.search", schema.RootElement),
+        ]);
+
+        var descriptor = Assert.Single(
+            provider.DescribeTools(new TianShuToolRegistrationContext()),
+            static item => item.ToolId == "mcp.docs.search");
+
+        Assert.Equal(ToolApprovalRequirement.Required, descriptor.ApprovalRequirement);
+        Assert.True(descriptor.Permissions.RequiresHumanGate);
+        Assert.Equal(SideEffectLevel.ExternalMutation, descriptor.SideEffects.Level);
+        Assert.Equal("object", descriptor.InputSchema!.Value.GetProperty("type").GetString());
+    }
+
     private static ITianShuToolHandler CreateHandler(string toolKey)
         => new McpResourceToolProvider().CreateHandler(toolKey, new TianShuToolActivationContext());
 
     private static ToolInvocationRequest CreateRequest(string toolName, JsonElement args)
         => new(new CallId("call_001"), toolName, "invoke", StructuredValue.FromJsonElement(args));
 
-    private static TianShuToolInvocationContext CreateContext(ITianShuMcpResourceToolServices services)
+    private static TianShuToolInvocationContext CreateContext(ITianShuMcpResourceToolServices? services = null)
         => new(
             ThreadId: "thread_001",
             TurnId: "turn_001",
             WorkingDirectory: Environment.CurrentDirectory,
             McpResourceServices: services);
+
+    private static TianShuMcpToolDescriptor CreateMcpToolDescriptor(string toolId, JsonElement schema)
+        => new(
+            "docs",
+            toolId.Split('.').Last(),
+            toolId,
+            "Docs MCP Tool",
+            "Projected dynamic MCP tool for tests.",
+            schema,
+            sideEffectLevel: SideEffectLevel.ExternalMutation,
+            requiresHumanGate: true,
+            requiredScopes: [toolId]);
 
     private static JsonDocument ParseSuccessPayload(ToolInvocationResult result)
     {

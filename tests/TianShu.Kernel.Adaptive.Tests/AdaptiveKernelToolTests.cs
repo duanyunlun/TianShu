@@ -20,7 +20,69 @@ public sealed class AdaptiveKernelToolTests
         var result = await orchestrator.ProposeAsync(intent, new KernelRunState(new KernelRunId("run-001"), intent.IntentId), new KernelRunOptions(requireHumanGate: false));
 
         Assert.IsType<KernelProposalSet>(result);
-        Assert.IsType<StageGraphProposal>(Assert.Single(result.Proposals));
+        Assert.All(result.Proposals, proposal => Assert.IsType<StageGraphProposal>(proposal));
+    }
+
+    [Fact]
+    public async Task AdaptiveOrchestrator_ProposesMultipleStructuredStageGraphCandidates()
+    {
+        var intent = CreateIntent();
+        var orchestrator = new AdaptiveOrchestrator();
+        var result = await orchestrator.ProposeAsync(
+            intent,
+            new KernelRunState(new KernelRunId("run-001"), intent.IntentId),
+            new KernelRunOptions(preferredGraphId: new StageGraphId("graph.acceptance"), requireHumanGate: false));
+
+        var proposals = result.Proposals.Cast<StageGraphProposal>().ToArray();
+
+        Assert.True(proposals.Length >= 3);
+        Assert.Equal(proposals.Length, proposals.Select(static proposal => proposal.Graph.GraphId.Value).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(proposals, proposal =>
+        {
+            Assert.NotEmpty(proposal.Graph.Stages);
+            Assert.NotEmpty(proposal.Graph.Policies.AllowedKernelToolIds);
+            Assert.NotEmpty(proposal.Graph.EvaluationRules.MetricIds);
+            Assert.Equal(SideEffectLevel.ReadOnly, proposal.Graph.Policies.MaxSideEffectLevel);
+            Assert.StartsWith("graph.acceptance.", proposal.Graph.GraphId.Value, StringComparison.Ordinal);
+        });
+        Assert.Contains(proposals, proposal => proposal.Graph.Metadata.Source == "candidate.direct");
+        Assert.Contains(proposals, proposal => proposal.Graph.Metadata.Source == "candidate.context_guarded");
+        Assert.Contains(proposals, proposal => proposal.Graph.Metadata.Source == "candidate.recovery_checked");
+        Assert.Contains(proposals, proposal => proposal.Graph.Edges.Any(edge => edge.TransitionKind == StageTransitionKind.Recovery));
+    }
+
+    [Fact]
+    public async Task DefaultCandidateGenerator_ReturnsOnlyStructuredStageGraphProposals()
+    {
+        var intent = CreateIntent();
+        var generator = new DefaultAdaptiveStageGraphCandidateGenerator();
+
+        var proposals = await generator.GenerateCandidatesAsync(
+            intent,
+            new KernelRunState(new KernelRunId("run-001"), intent.IntentId),
+            new KernelRunOptions(requireHumanGate: false));
+
+        Assert.True(proposals.Count >= 3);
+        Assert.All(proposals, proposal =>
+        {
+            Assert.IsType<StageGraphProposal>(proposal);
+            Assert.NotNull(proposal.Graph);
+            Assert.NotEmpty(proposal.Graph.Stages);
+        });
+    }
+
+    [Fact]
+    public async Task AdaptiveOrchestrator_PreservesComposeToolInjectionConstructor()
+    {
+        var intent = CreateIntent();
+        var orchestrator = new AdaptiveOrchestrator(new ComposeStageGraphKernelTool());
+
+        var result = await orchestrator.ProposeAsync(
+            intent,
+            new KernelRunState(new KernelRunId("run-001"), intent.IntentId),
+            new KernelRunOptions(requireHumanGate: false));
+
+        Assert.True(result.Proposals.Count >= 3);
     }
 
     [Fact]

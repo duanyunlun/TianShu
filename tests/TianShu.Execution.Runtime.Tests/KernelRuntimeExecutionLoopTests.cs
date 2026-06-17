@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using TianShu.Configuration;
 using TianShu.Contracts.Agents;
+using TianShu.Contracts.Configuration;
 using TianShu.Contracts.Execution;
 using TianShu.Contracts.Kernel;
 using TianShu.Contracts.Primitives;
@@ -15,6 +16,7 @@ using TianShu.Kernel;
 using TianShu.Kernel.Abstractions;
 using TianShu.Provider.Abstractions;
 using TianShu.RuntimeComposition;
+using TianShu.Tools.FileSystemMutating;
 
 namespace TianShu.Execution.Runtime.Tests;
 
@@ -154,13 +156,16 @@ public sealed class KernelRuntimeExecutionLoopTests
     public async Task KernelRuntimeTurnLoopBridge_ShouldPersistProductEvidenceWhenWorkingDirectoryAvailable()
     {
         using var workspace = new TempWorkspace();
+        using var home = new TempWorkspace("tianshu-kernel-loop-home");
         var result = await KernelRuntimeTurnLoopBridge.RunAsync(
             new KernelRuntimeTurnLoopRequest(
                 "验证产品终态投影",
                 WorkingDirectory: workspace.Path,
                 ResumeThreadId: null,
                 TurnTimeoutSeconds: 5,
-                Config: CreateConfiguredProviderConfig($"TIANSHU_TEST_MISSING_{Guid.NewGuid():N}")),
+                Config: CreateConfiguredProviderConfig(
+                    $"TIANSHU_TEST_MISSING_{Guid.NewGuid():N}",
+                    tianShuHomePath: home.Path)),
             CancellationToken.None);
 
         Assert.Equal("failed", result.TurnStatus);
@@ -179,6 +184,11 @@ public sealed class KernelRuntimeExecutionLoopTests
         Assert.Equal(result.ReplaySummary.Completeness, result.TerminalProjection.ReplayCompleteness);
         Assert.NotEmpty(result.TerminalProjection.RuntimeTraceRefs);
         Assert.NotEmpty(result.TerminalProjection.DiagnosticsRefs);
+        Assert.StartsWith(
+            TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(home.Path, "kernel-runtime", workspace.Path),
+            result.TerminalProjection.TurnLog.Reference,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(System.IO.Path.Combine(workspace.Path, ".tianshu")));
     }
 
     [Fact]
@@ -219,6 +229,7 @@ public sealed class KernelRuntimeExecutionLoopTests
     public async Task KernelRuntimeTurnLoopBridge_RunInterruptAsync_ShouldCancelMatchingActiveRun()
     {
         using var workspace = new TempWorkspace();
+        using var home = new TempWorkspace("tianshu-kernel-loop-home");
         using var provider = new DelayedProviderServer();
         const string threadId = "thread-active-cancel-001";
         var envKey = $"TIANSHU_TEST_ACTIVE_CANCEL_{Guid.NewGuid():N}";
@@ -231,11 +242,11 @@ public sealed class KernelRuntimeExecutionLoopTests
                     WorkingDirectory: workspace.Path,
                     ResumeThreadId: threadId,
                     TurnTimeoutSeconds: 30,
-                    Config: CreateConfiguredProviderConfig(envKey, provider.BaseUrl)),
+                    Config: CreateConfiguredProviderConfig(envKey, provider.BaseUrl, tianShuHomePath: home.Path)),
                 CancellationToken.None);
 
             await provider.WaitForRequestAsync(TimeSpan.FromSeconds(10));
-            Assert.True(File.Exists(BuildHostControlThreadIndexPath(workspace.Path, threadId)));
+            Assert.True(File.Exists(BuildHostControlThreadIndexPath(home.Path, workspace.Path, threadId)));
 
             var interrupt = await KernelRuntimeTurnLoopBridge.RunInterruptAsync(
                 new KernelRuntimeInterruptRequest(
@@ -243,7 +254,7 @@ public sealed class KernelRuntimeExecutionLoopTests
                     TurnId: null,
                     Reason: "user.cancel",
                     WorkingDirectory: workspace.Path,
-                    Config: CreateConfiguredProviderConfig($"TIANSHU_TEST_MISSING_{Guid.NewGuid():N}")),
+                    Config: CreateConfiguredProviderConfig($"TIANSHU_TEST_MISSING_{Guid.NewGuid():N}", tianShuHomePath: home.Path)),
                 CancellationToken.None);
             var runResult = await runTask.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -261,7 +272,8 @@ public sealed class KernelRuntimeExecutionLoopTests
             Assert.StartsWith("active-run://", runResult.TerminalProjection.ActiveRunCancellation.Reference, StringComparison.Ordinal);
             Assert.DoesNotContain("active_run_registry_not_migrated_23_7", runResult.TerminalProjection.DowngradeReasons);
             Assert.DoesNotContain("active_run_not_found", runResult.TerminalProjection.DowngradeReasons);
-            Assert.False(File.Exists(BuildHostControlThreadIndexPath(workspace.Path, threadId)));
+            Assert.False(File.Exists(BuildHostControlThreadIndexPath(home.Path, workspace.Path, threadId)));
+            Assert.False(Directory.Exists(System.IO.Path.Combine(workspace.Path, ".tianshu")));
         }
         finally
         {
@@ -273,12 +285,14 @@ public sealed class KernelRuntimeExecutionLoopTests
     public void KernelRuntimeHostControlFileStore_ShouldResolveActiveRunAndWriteCancelSignal()
     {
         using var workspace = new TempWorkspace();
+        using var home = new TempWorkspace("tianshu-kernel-loop-home");
         var record = KernelRuntimeHostControlFileStore.TryRegister(
             workspace.Path,
             "thread-cross-process-001",
             "turn-cross-process-001",
             "run-cross-process-001",
-            "等待跨进程取消");
+            "等待跨进程取消",
+            home.Path);
 
         Assert.NotNull(record);
         Assert.True(File.Exists(record.ThreadIndexPath));
@@ -288,7 +302,8 @@ public sealed class KernelRuntimeExecutionLoopTests
             workspace.Path,
             "thread-cross-process-001",
             turnId: null,
-            "user.cancel");
+            "user.cancel",
+            home.Path);
 
         Assert.NotNull(projection);
         Assert.True(projection.Available);
@@ -297,6 +312,11 @@ public sealed class KernelRuntimeExecutionLoopTests
         Assert.Equal("turn-cross-process-001", projection.TargetTurnId);
         Assert.Equal("run-cross-process-001", projection.TargetRunId);
         Assert.Equal("user.cancel", KernelRuntimeHostControlFileStore.TryReadCancellationReason(record.CancelSignalPath));
+        Assert.StartsWith(
+            TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(home.Path, "kernel-runtime", workspace.Path, "host-control"),
+            record.ThreadIndexPath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(System.IO.Path.Combine(workspace.Path, ".tianshu")));
 
         KernelRuntimeHostControlFileStore.TryUnregister(record);
         Assert.False(File.Exists(record.ThreadIndexPath));
@@ -364,6 +384,8 @@ public sealed class KernelRuntimeExecutionLoopTests
         Assert.Equal(SideEffectLevel.ReadOnly, hostStep.SideEffect.Level);
         Assert.True(hostStep.SideEffect.RequiresAudit);
         Assert.False(hostStep.Permission.RequiresHumanGate);
+        Assert.False(result.DiagnosticsProjection.ProviderToolSurface.Available);
+        Assert.Equal("provider_tool_surface_missing", result.DiagnosticsProjection.ProviderToolSurface.MissingReason);
         Assert.True(result.TerminalProjection.CheckpointResume.Available);
         Assert.Equal(checkpointRef, result.TerminalProjection.CheckpointResume.Reference);
         Assert.True(result.TerminalProjection.Steer.Available);
@@ -406,6 +428,73 @@ public sealed class KernelRuntimeExecutionLoopTests
 
         Assert.False(second.TerminalProjection.Steer.Available);
         Assert.Equal("not_requested", second.TerminalProjection.Steer.Disposition);
+    }
+
+    [Fact]
+    public async Task KernelRuntimeTurnLoopBridge_RunSteerAsync_ShouldPreserveExplicitCapabilitySurface()
+    {
+        using var workspace = new TempWorkspace();
+        using var provider = new DelayedProviderServer();
+        var envKey = $"TIANSHU_TEST_STEER_CAPABILITY_SURFACE_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(envKey, "test-api-key");
+        try
+        {
+            var run = KernelRuntimeTurnLoopBridge.RunSteerAsync(
+                new KernelRuntimeSteerRequest(
+                    "thread-steer-capabilities-001",
+                    TurnId: null,
+                    Message: "继续并检查能力面",
+                    SteerInputs: ["继续并检查能力面"],
+                    WorkingDirectory: workspace.Path,
+                    TurnTimeoutSeconds: 5,
+                    Config: CreateConfiguredProviderConfig(envKey, provider.BaseUrl),
+                    EnableWorkspaceWrite: true,
+                    WorkspaceWriteApprovalId: new ApprovalId("approval-steer-capability-001"),
+                    EnableShell: true,
+                    EnableMcp: true,
+                    EnableMemory: true),
+                CancellationToken.None);
+
+            await provider.WaitForRequestAsync(TimeSpan.FromSeconds(10));
+            var requestBody = await provider.ReadRequestBodyAsync();
+            await provider.CompleteResponsesAsync(BuildSse(
+                new
+                {
+                    type = "response.output_text.delta",
+                    delta = "steer applied",
+                },
+                new
+                {
+                    type = "response.completed",
+                    response = new
+                    {
+                        output_text = "steer applied",
+                        usage = new { input_tokens = 4, output_tokens = 2 },
+                    },
+                }));
+
+            var result = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("completed", result.TurnStatus);
+            Assert.True(result.DiagnosticsProjection.ProviderToolSurface.Available);
+            Assert.Contains("shell_command", result.DiagnosticsProjection.ProviderToolSurface.Names);
+            Assert.Contains("list_mcp_resources", result.DiagnosticsProjection.ProviderToolSurface.Names);
+            Assert.Contains("memory_search", result.DiagnosticsProjection.ProviderToolSurface.Names);
+
+            using var payload = JsonDocument.Parse(requestBody);
+            var toolNames = payload.RootElement.GetProperty("tools")
+                .EnumerateArray()
+                .Select(static tool => tool.GetProperty("name").GetString())
+                .ToArray();
+            Assert.Contains("write", toolNames);
+            Assert.Contains("apply_patch", toolNames);
+            Assert.Contains("shell_command", toolNames);
+            Assert.Contains("list_mcp_resources", toolNames);
+            Assert.Contains("memory_search", toolNames);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envKey, null);
+        }
     }
 
     [Fact]
@@ -671,16 +760,20 @@ public sealed class KernelRuntimeExecutionLoopTests
     }
 
     [Fact]
-    public void KernelRuntimeTurnLoopComposition_ShouldRegisterWorkspaceWriteToolOnlyWhenExplicitlyApproved()
+    public void KernelRuntimeTurnLoopComposition_ShouldRegisterWorkspaceWriteToolsOnlyWhenExplicitlyApproved()
     {
         var tools = KernelRuntimeTurnLoopComposition.CreateTools(includeWorkspaceWrite: true);
 
         Assert.Contains("write", tools.Keys);
-        Assert.DoesNotContain("apply_patch", tools.Keys);
+        Assert.Contains("apply_patch", tools.Keys);
         var writeTool = tools["write"];
+        var patchTool = tools["apply_patch"];
         Assert.Equal(SideEffectLevel.WorkspaceWrite, writeTool.Descriptor.SideEffects.Level);
+        Assert.Equal(SideEffectLevel.WorkspaceWrite, patchTool.Descriptor.SideEffects.Level);
         Assert.True(writeTool.Descriptor.Permissions.RequiresHumanGate);
+        Assert.True(patchTool.Descriptor.Permissions.RequiresHumanGate);
         Assert.Equal(ToolApprovalRequirement.Required, writeTool.Descriptor.ApprovalRequirement);
+        Assert.Equal(ToolApprovalRequirement.Required, patchTool.Descriptor.ApprovalRequirement);
     }
 
     [Fact]
@@ -714,6 +807,227 @@ public sealed class KernelRuntimeExecutionLoopTests
         Assert.NotNull(result.Failure);
         Assert.Contains("workspace-relative", result.Failure.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(targetFile));
+    }
+
+    [Fact]
+    public async Task WorkspaceWriteTool_ShouldRejectPathEscape()
+    {
+        using var workspace = new TempWorkspace();
+        var escapedFile = Path.GetFullPath(Path.Combine(workspace.Path, "..", $"tianshu-escaped-{Guid.NewGuid():N}.txt"));
+        var tools = KernelRuntimeTurnLoopComposition.CreateTools(includeWorkspaceWrite: true);
+        var writeTool = tools["write"];
+
+        var result = await writeTool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-write-path-escape",
+                "write",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = "../" + Path.GetFileName(escapedFile),
+                    ["content"] = "should not be written",
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "write-path-escape"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("write.invalid_request", result.Failure.Code);
+        Assert.Contains("禁止写入路径", result.Failure.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(escapedFile));
+    }
+
+    [Fact]
+    public async Task WorkspaceWriteTool_ShouldRejectWhenApprovalMissingAtToolBoundary()
+    {
+        using var workspace = new TempWorkspace();
+        var targetFile = Path.Combine(workspace.Path, "approval-denied.txt");
+        var tool = CreateMutatingFileSystemTool(
+            "write",
+            new TestFileMutationServices(_ => true, _ => false));
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-write-approval-denied",
+                "write",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = "approval-denied.txt",
+                    ["content"] = "should not be written",
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "write-approval-denied"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("workspace_mutation_approval_required", result.Failure.Code);
+        Assert.False(File.Exists(targetFile));
+    }
+
+    [Fact]
+    public async Task WorkspaceWriteTool_ShouldRejectExpectedBeforeHashConflict()
+    {
+        using var workspace = new TempWorkspace();
+        var targetFile = Path.Combine(workspace.Path, "conflict.txt");
+        await File.WriteAllTextAsync(targetFile, "current", Encoding.UTF8);
+        var tool = CreateMutatingFileSystemTool("write", TestFileMutationServices.AllowAll);
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-write-hash-conflict",
+                "write",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = "conflict.txt",
+                    ["content"] = "updated",
+                    ["expectedBeforeHash"] = new string('0', 64),
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "write-hash-conflict"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("workspace_mutation_conflict", result.Failure.Code);
+        Assert.Equal("current", await File.ReadAllTextAsync(targetFile, Encoding.UTF8));
+    }
+
+    [Fact]
+    public async Task WorkspaceApplyPatchTool_ShouldRejectPathEscape()
+    {
+        using var workspace = new TempWorkspace();
+        var escapedFile = Path.GetFullPath(Path.Combine(workspace.Path, "..", $"tianshu-patch-escaped-{Guid.NewGuid():N}.txt"));
+        var tool = CreateMutatingFileSystemTool("apply_patch", TestFileMutationServices.AllowAll);
+        var patch = $"""
+            *** Begin Patch
+            *** Add File: ../{Path.GetFileName(escapedFile)}
+            +should not be written
+            *** End Patch
+            """;
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-apply-patch-path-escape",
+                "apply_patch",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["input"] = patch,
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "apply-patch-path-escape"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("workspace_mutation_path_escape", result.Failure.Code);
+        Assert.False(File.Exists(escapedFile));
+    }
+
+    [Fact]
+    public async Task WorkspaceApplyPatchTool_ShouldRejectWhenApprovalMissingAtToolBoundary()
+    {
+        using var workspace = new TempWorkspace();
+        var targetFile = Path.Combine(workspace.Path, "patch-approval-denied.txt");
+        var tool = CreateMutatingFileSystemTool(
+            "apply_patch",
+            new TestFileMutationServices(_ => true, _ => false));
+        const string patch = """
+            *** Begin Patch
+            *** Add File: patch-approval-denied.txt
+            +should not be written
+            *** End Patch
+            """;
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-apply-patch-approval-denied",
+                "apply_patch",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["input"] = patch,
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "apply-patch-approval-denied"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("workspace_mutation_approval_required", result.Failure.Code);
+        Assert.False(File.Exists(targetFile));
+    }
+
+    [Fact]
+    public async Task WorkspaceApplyPatchTool_ShouldApplyApprovedPatchAndProjectWorkspaceMutation()
+    {
+        using var workspace = new TempWorkspace();
+        var targetFile = Path.Combine(workspace.Path, "patch-created.txt");
+        var tool = CreateMutatingFileSystemTool("apply_patch", TestFileMutationServices.AllowAll);
+        const string patch = """
+            *** Begin Patch
+            *** Add File: patch-created.txt
+            +created by patch
+            *** End Patch
+            """;
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-apply-patch-approved",
+                "apply_patch",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["input"] = patch,
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "apply-patch-approved"),
+            CancellationToken.None);
+
+        Assert.Null(result.Failure);
+        Assert.Equal("created by patch\n", await File.ReadAllTextAsync(targetFile, Encoding.UTF8));
+        var workspaceMutation = Assert.Single(result.StreamItems).Payload;
+        Assert.Equal("tool.workspace_mutation", workspaceMutation.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("succeeded", workspaceMutation.GetProperty("status").GetString());
+        Assert.Equal("apply_patch", workspaceMutation.GetProperty("toolId").GetString());
+        Assert.Equal("apply_patch", workspaceMutation.GetProperty("kind").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("changePlanArtifactRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("diffPreviewRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("auditRef").GetString()));
+        var appliedTarget = Assert.Single(workspaceMutation.GetProperty("appliedTargets").Items);
+        Assert.Equal("patch-created.txt", appliedTarget.GetProperty("workspaceRelativePath").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(appliedTarget.GetProperty("afterHash").GetString()));
+    }
+
+    [Fact]
+    public async Task WorkspaceApplyPatchTool_ShouldProjectCompensationWhenPartialApplyFails()
+    {
+        using var workspace = new TempWorkspace();
+        var sourceFile = Path.Combine(workspace.Path, "source.txt");
+        var blockingParent = Path.Combine(workspace.Path, "parent-as-file");
+        var transientFile = Path.Combine(workspace.Path, "created-before-failure.txt");
+        await File.WriteAllTextAsync(sourceFile, "source\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(blockingParent, "not a directory", Encoding.UTF8);
+        var tool = CreateMutatingFileSystemTool("apply_patch", TestFileMutationServices.AllowAll);
+        const string patch = """
+            *** Begin Patch
+            *** Add File: created-before-failure.txt
+            +transient
+            *** Update File: source.txt
+            *** Move to: parent-as-file/child.txt
+            -source
+            +updated
+            *** End Patch
+            """;
+
+        var result = await tool.InvokeAsync(
+            CreateWorkspaceMutationInvocation(
+                "call-apply-patch-partial-failure",
+                "apply_patch",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["input"] = patch,
+                }),
+            CreateWorkspaceMutationContext(workspace.Path, "apply-patch-partial-failure"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Failure);
+        Assert.Equal("workspace_mutation_partial_apply_failed", result.Failure.Code);
+        Assert.NotNull(result.Failure.Problem);
+        Assert.False(File.Exists(transientFile));
+        Assert.Equal("source\n", await File.ReadAllTextAsync(sourceFile, Encoding.UTF8));
+        var workspaceMutation = result.Failure.Problem!.Details.Entries["workspaceMutation"];
+        Assert.Equal("call-apply-patch-partial-failure.workspace-mutation-plan", workspaceMutation.GetProperty("planId").GetString());
+        var compensation = workspaceMutation.GetProperty("compensation");
+        Assert.Equal("restored", compensation.GetProperty("status").GetString());
+        Assert.NotEmpty(compensation.GetProperty("items").Items);
     }
 
     [Fact]
@@ -850,9 +1164,21 @@ public sealed class KernelRuntimeExecutionLoopTests
         var secondInputJson = secondPayload.RootElement.GetProperty("input").GetRawText();
         Assert.Contains("function_call_output", secondInputJson, StringComparison.Ordinal);
         Assert.Contains("approved.txt", secondInputJson, StringComparison.Ordinal);
-        Assert.Contains(result.RuntimeResult!.StepResults, step =>
+        var writeStep = Assert.Single(result.RuntimeResult!.StepResults, step =>
             step.StepKind == RuntimeStepKind.ToolInvocation
             && step.Output?.GetProperty("toolId").GetString() == "write");
+        var toolResult = Assert.Single(writeStep.Output!.GetProperty("toolResults").Items);
+        var streamItem = Assert.Single(toolResult.GetProperty("output").GetProperty("streamItems").Items);
+        var workspaceMutation = streamItem.GetProperty("payload");
+        Assert.Equal("tool.workspace_mutation", workspaceMutation.GetProperty("runtimeBoundary").GetString());
+        Assert.Equal("succeeded", workspaceMutation.GetProperty("status").GetString());
+        Assert.Equal("write", workspaceMutation.GetProperty("toolId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("changePlanArtifactRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("diffPreviewRef").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(workspaceMutation.GetProperty("auditRef").GetString()));
+        var appliedTarget = Assert.Single(workspaceMutation.GetProperty("appliedTargets").Items);
+        Assert.Equal("approved.txt", appliedTarget.GetProperty("workspaceRelativePath").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(appliedTarget.GetProperty("afterHash").GetString()));
     }
 
     [Fact]
@@ -2136,9 +2462,16 @@ public sealed class KernelRuntimeExecutionLoopTests
     private static ResolvedTianShuConfig CreateConfiguredProviderConfig(
         string envKey,
         string baseUrl = "https://provider.test/v1",
-        string wireApi = ProviderWireApi.Responses)
+        string wireApi = ProviderWireApi.Responses,
+        string? tianShuHomePath = null)
         => new()
         {
+            ConfigFilePath = string.IsNullOrWhiteSpace(tianShuHomePath)
+                ? string.Empty
+                : System.IO.Path.Combine(tianShuHomePath!, "tianshu.toml"),
+            UserConfigPath = string.IsNullOrWhiteSpace(tianShuHomePath)
+                ? string.Empty
+                : System.IO.Path.Combine(tianShuHomePath!, "tianshu.toml"),
             Model = "gpt-test",
             ModelProvider = "openai",
             ProviderBaseUrl = baseUrl,
@@ -2174,11 +2507,11 @@ public sealed class KernelRuntimeExecutionLoopTests
             ? "-"
             : JsonSerializer.Serialize(failure.Details.ToPlainObject());
 
-    private static string BuildHostControlThreadIndexPath(string workspacePath, string threadId)
-        => System.IO.Path.Combine(
-            workspacePath,
-            ".tianshu",
+    private static string BuildHostControlThreadIndexPath(string tianShuHomePath, string workspacePath, string threadId)
+        => TianShuRuntimeLayoutPaths.ResolveRuntimeWorkspacePathFromHome(
+            tianShuHomePath,
             "kernel-runtime",
+            workspacePath,
             "host-control",
             "active-runs",
             "by-thread",
@@ -2198,14 +2531,69 @@ public sealed class KernelRuntimeExecutionLoopTests
         return builder.ToString();
     }
 
+    private static ITianShuTool CreateMutatingFileSystemTool(string toolId, ITianShuFileMutationToolServices fileMutationServices)
+    {
+        var provider = new MutatingFileSystemToolProvider();
+        var handler = provider.CreateHandler(toolId, new TianShuToolActivationContext());
+        return new TianShuToolHandlerAdapter(
+            handler,
+            context => new TianShuToolInvocationContext(
+                context.SourceIntentId,
+                context.RuntimeStepId,
+                context.WorkingDirectory ?? string.Empty,
+                FileMutationServices: fileMutationServices,
+                Metadata: context.Metadata));
+    }
+
+    private static ToolInvocationEnvelope CreateWorkspaceMutationInvocation(
+        string callId,
+        string toolId,
+        IReadOnlyDictionary<string, object?> input)
+        => new(
+            new CallId(callId),
+            toolId,
+            toolId,
+            StructuredValue.FromPlainObject(input),
+            new PermissionEnvelope([$"tool.{toolId}"], requiresHumanGate: true),
+            new SideEffectProfile(SideEffectLevel.WorkspaceWrite, ["workspace"], reversible: false, requiresAudit: true));
+
+    private static ToolInvocationContext CreateWorkspaceMutationContext(string workspacePath, string suffix)
+        => new(
+            $"runtime-step-{suffix}",
+            $"intent-{suffix}",
+            $"graph-{suffix}",
+            "stage-tool-exec",
+            $"operation-{suffix}",
+            workspacePath);
+
     private static readonly CoreIntentId SourceIntentId = new("intent-loop");
     private static readonly StageGraphId SourceGraphId = new("graph-loop");
 
+    private sealed class TestFileMutationServices : ITianShuFileMutationToolServices
+    {
+        private readonly Func<string, bool> allowWrite;
+        private readonly Func<string, bool> approveChange;
+
+        public TestFileMutationServices(Func<string, bool> allowWrite, Func<string, bool> approveChange)
+        {
+            this.allowWrite = allowWrite;
+            this.approveChange = approveChange;
+        }
+
+        public static TestFileMutationServices AllowAll { get; } = new(_ => true, _ => true);
+
+        public bool IsWritePathAllowed(string fullPath)
+            => allowWrite(fullPath);
+
+        public bool IsFileChangeApproved(string fullPath)
+            => approveChange(fullPath);
+    }
+
     private sealed class TempWorkspace : IDisposable
     {
-        public TempWorkspace()
+        public TempWorkspace(string prefix = "tianshu-kernel-loop")
         {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"tianshu-kernel-loop-{Guid.NewGuid():N}");
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{prefix}-{Guid.NewGuid():N}");
             Directory.CreateDirectory(Path);
         }
 
@@ -2242,6 +2630,24 @@ public sealed class KernelRuntimeExecutionLoopTests
         public async Task WaitForRequestAsync(TimeSpan timeout)
         {
             await requestReceived.Task.WaitAsync(timeout);
+        }
+
+        public async Task<string> ReadRequestBodyAsync()
+        {
+            await WaitForRequestAsync(TimeSpan.FromSeconds(10));
+            using var reader = new StreamReader(context!.Request.InputStream, context.Request.ContentEncoding);
+            return await reader.ReadToEndAsync();
+        }
+
+        public async Task CompleteResponsesAsync(string responseBody)
+        {
+            await WaitForRequestAsync(TimeSpan.FromSeconds(10));
+            var bytes = Encoding.UTF8.GetBytes(responseBody);
+            context!.Response.StatusCode = 200;
+            context.Response.ContentType = "text/event-stream";
+            context.Response.ContentLength64 = bytes.Length;
+            await context.Response.OutputStream.WriteAsync(bytes);
+            context.Response.Close();
         }
 
         public void Dispose()
